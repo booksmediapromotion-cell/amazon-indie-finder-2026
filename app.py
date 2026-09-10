@@ -1,5 +1,5 @@
 """
-Indie Author Finder 2026 - Google Books API
+Indie Author Finder 2026 - Auto Fetch Books
 """
 import streamlit as st
 from datetime import date, datetime
@@ -130,9 +130,10 @@ class DB:
         finally:
             s.close()
 
-def search_google_books(query, max_results=20):
-    """Google Books API - searches for books"""
+def fetch_books_from_api(genre="Fiction", year=2026, max_results=20):
+    """Fetch books from Google Books API based on genre and year"""
     url = "https://www.googleapis.com/books/v1/volumes"
+    query = f"{genre} books {year} indie"
     params = {
         "q": query,
         "maxResults": min(max_results, 40),
@@ -151,8 +152,8 @@ def search_google_books(query, max_results=20):
                     books.append({
                         "title": v.get("title", ""),
                         "author": authors[0],
-                        "year": int(v.get("publishedDate", "2026")[:4]) if v.get("publishedDate") else 2026,
-                        "genre": v.get("categories", ["Fiction"])[0] if v.get("categories") else "Fiction",
+                        "year": int(v.get("publishedDate", str(year))[:4]) if v.get("publishedDate") else year,
+                        "genre": genre,
                         "url": v.get("infoLink", ""),
                         "image": v.get("imageLinks", {}).get("thumbnail", ""),
                         "publisher": v.get("publisher", "")
@@ -193,16 +194,15 @@ with c4:
 
 st.divider()
 
-# Search section
-st.subheader("📖 Search & Add Books")
-query = st.text_input("Search Query", value="indie fiction 2026")
-max_books = st.slider("Max Results", 5, 40, 20)
-
-if st.button("Search Google Books", type="primary"):
-    with st.spinner("Searching Google Books API..."):
-        books = search_google_books(query, max_books)
+# Auto-fetch button
+if st.button("📖 Fetch Books from Google", type="primary"):
+    with st.spinner("Fetching books from Google Books API..."):
+        year_val = 2026 if year_f == "All Years" else int(year_f)
+        genre_val = "Fiction" if genre_f == "All Genres" else genre_f
+        books = fetch_books_from_api(genre=genre_val, year=year_val, max_results=20)
+        
         if books:
-            st.success(f"✅ Found {len(books)} books from Google Books API!")
+            st.success(f"✅ Found {len(books)} books!")
             
             for bk in books:
                 with st.container():
@@ -233,7 +233,7 @@ if st.button("Search Google Books", type="primary"):
                 st.success(f"Added {cnt} books!")
                 st.balloons()
         else:
-            st.warning("No books found. Try different query!")
+            st.warning("No books found. Try different filters!")
 
 st.divider()
 
@@ -244,7 +244,7 @@ books = db.get_books(genre=genre_f, location=location_f, month=month_f, year=yea
 st.write(f"### Results: {len(books)} Books")
 
 if not books:
-    st.info("No books in database. Search and add books above!")
+    st.info("No books in database. Click 'Fetch Books' above!")
 else:
     for b in books:
         with st.container():
@@ -265,4 +265,4 @@ else:
             st.divider()
 
 st.divider()
-st.write("v13.0 - Google Books API")
+st.write("v14.0 - Auto Fetch")
