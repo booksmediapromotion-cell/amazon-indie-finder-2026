@@ -1,5 +1,5 @@
 """
-Indie Author Finder 2026 - Clean Version
+Indie Author Finder 2026 - With Filters
 """
 import streamlit as st
 from datetime import date, datetime
@@ -10,6 +10,8 @@ import requests
 import random
 
 USA_STATES = ["All USA", "California", "Texas", "New York", "Florida"]
+GENRES = ["All Genres", "Fiction", "Nonfiction", "Fantasy", "Sci-Fi", "Mystery", "Romance", "Thriller", "Self-Help", "Business"]
+MONTHS = ["All Months", "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
 
 Base = declarative_base()
 
@@ -70,14 +72,23 @@ class DB:
         finally:
             s.close()
 
-    def get_books(self, limit=50):
+    def get_books(self, genre="All Genres", month="All Months", limit=50):
         s = self.session()
         try:
-            return s.query(Book).options(joinedload(Book.author)).order_by(Book.publication_date.desc()).limit(limit).all()
+            q = s.query(Book).options(joinedload(Book.author))
+
+            if genre != "All Genres":
+                q = q.filter(Book.genre == genre)
+
+            if month != "All Months":
+                q = q.filter(Book.publication_month == month)
+
+            q = q.order_by(Book.publication_date.desc()).limit(limit)
+            return q.all()
         finally:
             s.close()
 
-    def add_book(self, title, author_name, genre, year, url):
+    def add_book(self, title, author_name, genre, year, url, image=""):
         s = self.session()
         try:
             ex = s.query(Author).filter(func.lower(Author.name)==func.lower(author_name)).first()
@@ -98,6 +109,7 @@ class DB:
                 publication_month=pd.strftime("%B"),
                 publication_year=year,
                 amazon_url=url,
+                cover_image=image,
                 source_url=url,
                 date_found=date.today()
             )
@@ -145,11 +157,24 @@ with st.sidebar:
 
 if pg == "Dashboard":
     st.title("📚 Indie Author Finder")
-    db = DB()
-    st.metric("Total Books", db.count_books())
+
+    # Filters
+    c1, c2 = st.columns(2)
+    with c1:
+        genre_f = st.selectbox("📚 Genre", GENRES)
+    with c2:
+        month_f = st.selectbox("📅 Month", MONTHS)
+
     st.divider()
 
-    books = db.get_books(50)
+    db = DB()
+    c1, c2 = st.columns(2)
+    with c1: st.metric("Total Books", db.count_books())
+    with c2: st.metric("Total Authors", db.count_authors())
+
+    st.divider()
+
+    books = db.get_books(genre=genre_f, month=month_f, limit=50)
     st.write(f"### Books ({len(books)})")
 
     if not books:
@@ -167,7 +192,7 @@ if pg == "Dashboard":
                     st.write(f"### {b.title}")
                     st.write(f"**Author:** {b.author.name if b.author else '?'}")
                     st.write(f"**Genre:** {b.genre}")
-                    st.write(f"**Date:** {b.publication_date}")
+                    st.write(f"**Published:** {b.publication_date.strftime('%B %d, %Y')}")
                     if b.source_url:
                         st.link_button("View", b.source_url)
                 st.divider()
@@ -201,7 +226,7 @@ elif pg == "Search":
                     db = DB()
                     cnt = 0
                     for bk in books:
-                        if db.add_book(bk["title"], bk["author"], bk["genre"], bk["year"], bk["url"]):
+                        if db.add_book(bk["title"], bk["author"], bk["genre"], bk["year"], bk["url"], bk.get("image", "")):
                             cnt += 1
                     st.success(f"Added {cnt} books!")
                     st.balloons()
@@ -215,4 +240,4 @@ elif pg == "Search":
         st.success("Cleared! Refresh page")
 
 st.divider()
-st.write("v10.0")
+st.write("v11.0 with Filters")
