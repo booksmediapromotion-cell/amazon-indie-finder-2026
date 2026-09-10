@@ -1,17 +1,15 @@
 """
-Amazon Indie Author Finder 2026 - LIVE GOODREADS SCRAPER
-Pulls real-time data from Goodreads (no API key needed)
+Amazon Indie Author Finder 2026 - GOOGLE BOOKS API
+Free API, works reliably, real books
 """
 import streamlit as st
 from datetime import date, datetime
 import pandas as pd
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
 from sqlalchemy import Column, Integer, String, Date, DateTime, ForeignKey, func
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship, joinedload
 import requests
-from bs4 import BeautifulSoup
 import random
-import time
 
 USA_STATES = [
     "All USA", "California", "Texas", "New York", "Florida", "Washington",
@@ -112,66 +110,68 @@ class DatabaseManager:
             result.append(d)
         return result
 
-def scrape_goodreads(query="self published books 2026", max_books=20):
-    """Scrape Goodreads for indie books"""
+def search_google_books(query="independently published", max_results=20):
+    """Search Google Books API"""
 
-    base_url = "https://www.goodreads.com/search"
+    url = "https://www.googleapis.com/books/v1/volumes"
     params = {
         "q": query,
-        "search_type": "books"
-    }
-
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        "maxResults": min(max_results, 40),
+        "orderBy": "newest",
+        "printType": "books"
     }
 
     try:
-        response = requests.get(base_url, params=params, headers=headers, timeout=10)
+        response = requests.get(url, params=params, timeout=10)
         response.raise_for_status()
+        data = response.json()
 
-        soup = BeautifulSoup(response.text, "html.parser")
         books = []
+        if "items" in data:
+            for item in data["items"]:
+                vol = item.get("volumeInfo", {})
 
-        book_elements = soup.find_all("tr", class_="itemRow", limit=max_books)
+                authors = vol.get("authors", [])
+                if not authors:
+                    continue
 
-        for elem in book_elements[:max_books]:
-            try:
-                title_elem = elem.find("a", class_="bookTitle")
-                author_elem = elem.find("a", class_="authorName")
-                rating_elem = elem.find("span", class_="staticRating")
+                title = vol.get("title", "Unknown")
+                author = authors[0]
+                pub_date = vol.get("publishedDate", "")
+                publisher = vol.get("publisher", "")
+                categories = vol.get("categories", [])
+                info_link = vol.get("infoLink", "")
+                image = vol.get("imageLinks", {}).get("thumbnail", "")
 
-                if title_elem and author_elem:
-                    title = title_elem.get_text(strip=True)
-                    author = author_elem.get_text(strip=True)
-                    book_url = "https://www.goodreads.com" + title_elem.get("href", "")
+                # Extract year
+                year = 2026
+                if pub_date and len(pub_date) >= 4:
+                    try:
+                        year = int(pub_date[:4])
+                    except:
+                        year = 2026
 
-                    rating = 0
-                    if rating_elem:
-                        try:
-                            rating = float(rating_elem.get_text(strip=True).split()[0])
-                        except:
-                            rating = 4.0
+                genre = categories[0] if categories else "Fiction"
+                rating = 4.0  # Default
 
-                    genre = "Nonfiction" if "publishing" in query.lower() else "Fiction"
-
-                    books.append({
-                        "title": title,
-                        "author": author,
-                        "goodreads_url": book_url,
-                        "rating": rating,
-                        "genre": genre,
-                        "year": 2026
-                    })
-            except Exception as e:
-                continue
+                books.append({
+                    "title": title,
+                    "author": author,
+                    "publisher": publisher,
+                    "year": year,
+                    "genre": genre,
+                    "url": info_link,
+                    "image": image,
+                    "rating": rating
+                })
 
         return books
 
     except Exception as e:
-        st.error(f"Error scraping: {str(e)}")
+        st.error(f"API Error: {str(e)}")
         return []
 
-def add_live_books(books_data):
+def add_books(books_data):
     db = DatabaseManager()
     session = db.get_session_raw()
     count = 0
@@ -197,7 +197,7 @@ def add_live_books(books_data):
         else:
             aid = ex.id
 
-        pd_date = date(bd["year"], random.randint(1, 12), random.randint(1, 28))
+        pd_date = date(bd["year"], random.randint(1, 12), 1)
 
         b = Book(
             title=bd["title"],
@@ -206,11 +206,11 @@ def add_live_books(books_data):
             publication_date=pd_date,
             publication_month=pd_date.strftime("%B"),
             publication_year=pd_date.year,
-            amazon_url=bd["goodreads_url"],
-            cover_image=None,
-            publisher="Independently Published",
+            amazon_url=bd["url"],
+            cover_image=bd.get("image"),
+            publisher=bd.get("publisher", "Indie"),
             publishing_type="Self-Published",
-            source_url=bd["goodreads_url"],
+            source_url=bd["url"],
             date_found=date.today(),
             first_seen=date.today(),
             last_checked=date.today(),
@@ -221,13 +221,12 @@ def add_live_books(books_data):
         session.add(b)
         session.commit()
         count += 1
-        time.sleep(0.5)
 
     session.close()
     return count
 
 st.set_page_config(
-    page_title="Indie Author Finder - LIVE",
+    page_title="Indie Author Finder",
     page_icon="📚",
     layout="wide"
 )
@@ -236,7 +235,7 @@ with st.sidebar:
     st.markdown("### 📚 Menu")
     page = st.radio(
         "Go to",
-        ["Dashboard", "Live Goodreads"],
+        ["Dashboard", "Search Books"],
         label_visibility="collapsed"
     )
     st.divider()
@@ -246,7 +245,7 @@ with st.sidebar:
 
 if page == "Dashboard":
     st.title("📚 Indie Author Finder 2026")
-    st.markdown("LIVE data from Goodreads")
+    st.markdown("Real books from Google Books API")
 
     db = DatabaseManager()
     c1, c2 = st.columns(2)
@@ -257,7 +256,7 @@ if page == "Dashboard":
 
     with st.sidebar:
         search = st.text_input("Search Title")
-        genre_list = ["All", "Nonfiction", "Fiction"]
+        genre_list = ["All", "Fiction", "Nonfiction"]
         genre_f = st.selectbox("Genre", genre_list)
         state_f = st.selectbox("State", USA_STATES)
 
@@ -270,14 +269,14 @@ if page == "Dashboard":
     st.markdown(f"### Books ({len(books)})")
 
     if not books:
-        st.info("📝 No books yet. Go to Live Goodreads!")
+        st.info("📝 No books yet. Go to Search Books!")
     else:
         for bk in books:
             with st.container():
                 c1, c2 = st.columns([1, 5])
                 with c1:
                     if bk.cover_image:
-                        st.image(bk.cover_image, width=120)
+                        st.image(bk.cover_image, width=100)
                     else:
                         st.markdown("📖")
                 with c2:
@@ -293,7 +292,7 @@ if page == "Dashboard":
                     st.markdown(f"{em} Score: {sc}")
 
                     if bk.source_url:
-                        st.link_button("📚 Goodreads", bk.source_url)
+                        st.link_button("📚 View", bk.source_url)
                 st.divider()
 
     if st.button("📄 Export CSV"):
@@ -303,63 +302,76 @@ if page == "Dashboard":
         st.download_button(
             "Download CSV",
             data=csv,
-            file_name=f"indie_books_{date.today()}.csv",
+            file_name=f"books_{date.today()}.csv",
             mime="text/csv"
         )
 
-elif page == "Live Goodreads":
-    st.markdown("### 🔴 LIVE Goodreads Scraper")
-    st.info("✅ Pulls REAL-TIME data from Goodreads!")
+elif page == "Search Books":
+    st.markdown("### 🔍 Search Google Books API")
+    st.info("✅ FREE Google Books API - Works reliably!")
 
     query = st.text_input(
         "Search Query",
-        value="self published books",
-        help="Search Goodreads for indie books"
+        value="independently published 2026",
+        help="Search for indie books"
     )
 
-    max_books = st.slider("Max Books", 5, 40, 20)
+    max_books = st.slider("Max Results", 5, 40, 20)
 
-    if st.button("🔍 Search Goodreads LIVE", type="primary"):
-        with st.spinner(f"Searching Goodreads for '{query}'..."):
-            books = scrape_goodreads(query=query, max_books=max_books)
+    if st.button("🔍 Search", type="primary"):
+        with st.spinner(f"Searching..."):
+            books = search_google_books(query=query, max_results=max_books)
 
             if books:
                 st.success(f"Found {len(books)} books!")
 
                 st.markdown(f"### Results ({len(books)} books)")
-                for i, bk in enumerate(books[:10]):
+                for bk in books[:10]:
                     with st.container():
                         c1, c2 = st.columns([1, 4])
-                        with c1: st.markdown("📖")
+                        with c1:
+                            if bk.get("image"):
+                                st.image(bk["image"], width=80)
+                            else:
+                                st.markdown("📖")
                         with c2:
                             st.markdown(f"**{bk["title"]}**")
                             st.markdown(f"By: {bk["author"]}")
-                            st.markdown(f"⭐ {bk["rating"]}/5")
-                            st.link_button("Goodreads", bk["goodreads_url"])
+                            st.markdown(f"⭐ {bk["rating"]}/5 | {bk["genre"]}")
+                            st.link_button("View Book", bk["url"])
                         st.divider()
 
                 if len(books) > 10:
                     st.info(f"...and {len(books) - 10} more")
 
-                if st.button(f"➕ Add All {len(books)} Books to Database", type="primary"):
-                    with st.spinner("Adding books..."):
-                        cnt = add_live_books(books)
+                if st.button(f"➕ Add All {len(books)} Books", type="primary"):
+                    with st.spinner("Adding..."):
+                        cnt = add_books(books)
                         st.success(f"✅ Added {cnt} books!")
                         st.balloons()
-                        st.info("Go to Dashboard to see them!")
+                        st.info("Go to Dashboard!")
             else:
                 st.warning("No books found. Try different query.")
 
     st.divider()
-    st.markdown("### ⚙️ Database Options")
+    st.markdown("### ⚙️ Database")
 
     db = DatabaseManager()
     st.info(f"Current: {db.count_books()} books")
 
     if st.button("🗑️ Clear All Data", type="secondary"):
         db.clear_all_data()
-        st.success("✅ All data cleared!")
-        st.info("Refresh page to see changes")
+        st.success("✅ Cleared!")
+        st.info("Refresh to see changes")
+
+    st.markdown("### 💡 Search Tips:")
+    st.markdown("""
+    - "independently published 2026"
+    - "self-published fiction"
+    - "indie author fantasy"
+    - "self published romance"
+    - "indie books mystery"
+    """)
 
 st.divider()
-st.markdown("LIVE Goodreads Scraper | v8.0")
+st.markdown("Google Books API | v9.0"
