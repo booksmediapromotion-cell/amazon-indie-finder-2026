@@ -1,5 +1,5 @@
 """
-Amazon Indie Author Finder 2026 - GOODREADS (Fixed Quotes)
+Amazon Indie Author Finder 2026 - GOODREADS FINAL (No Apostrophes)
 """
 import streamlit as st
 from datetime import date, timedelta, datetime
@@ -14,23 +14,23 @@ USA_STATES = ["All USA", "Alabama", "Alaska", "Arizona", "Arkansas", "California
 Base = declarative_base()
 
 class Author(Base):
-    __tablename__ = 'authors'
+    __tablename__ = "authors"
     id = Column(Integer, primary_key=True)
     name = Column(String(255), nullable=False, index=True)
     website = Column(String(500))
     email = Column(String(255))
     state = Column(String(100), index=True)
-    country = Column(String(100), default='USA')
+    country = Column(String(100), default="USA")
     instagram = Column(String(255))
     facebook = Column(String(255))
     linkedin = Column(String(255))
     created_at = Column(DateTime, default=datetime.utcnow)
 
 class Book(Base):
-    __tablename__ = 'books'
+    __tablename__ = "books"
     id = Column(Integer, primary_key=True)
     title = Column(String(500), nullable=False, index=True)
-    author_id = Column(Integer, ForeignKey('authors.id'), nullable=False, index=True)
+    author_id = Column(Integer, ForeignKey("authors.id"), nullable=False, index=True)
     genre = Column(String(100), index=True)
     subgenre = Column(String(100))
     publication_date = Column(Date, nullable=False, index=True)
@@ -39,17 +39,17 @@ class Book(Base):
     amazon_url = Column(String(500))
     cover_image = Column(String(500))
     publisher = Column(String(255))
-    publishing_type = Column(String(50), default='Unknown / Needs Verification')
+    publishing_type = Column(String(50), default="Unknown / Needs Verification")
     source_url = Column(String(500))
     date_found = Column(Date, nullable=False, index=True)
     first_seen = Column(Date, nullable=False)
     last_checked = Column(Date, nullable=False)
-    verification_status = Column(String(50), default='Needs Review')
+    verification_status = Column(String(50), default="Needs Review")
     indie_score = Column(Integer, default=0)
     author = relationship("Author", backref="books")
 
 class DailyDiscoveryLog(Base):
-    __tablename__ = 'daily_discovery_log'
+    __tablename__ = "daily_discovery_log"
     id = Column(Integer, primary_key=True)
     discovery_date = Column(Date, nullable=False, unique=True, index=True)
     books_found = Column(Integer, default=0)
@@ -57,12 +57,12 @@ class DailyDiscoveryLog(Base):
     duplicates_removed = Column(Integer, default=0)
     failed_sources = Column(Integer, default=0)
     last_run_time = Column(DateTime)
-    status = Column(String(50), default='pending')
+    status = Column(String(50), default="pending")
 
 class DatabaseManager:
     def __init__(self):
-        db_path = 'indie_authors.db'
-        self.engine = create_engine(f'sqlite:///{db_path}', echo=False)
+        db_path = "indie_authors.db"
+        self.engine = create_engine(f"sqlite:///{db_path}", echo=False)
         Base.metadata.create_all(self.engine)
         self.Session = sessionmaker(bind=self.engine)
 
@@ -102,14 +102,14 @@ class DatabaseManager:
         try:
             query = session.query(Book).options(joinedload(Book.author))
             if filters:
-                if filters.get('genre'):
-                    query = query.filter(Book.genre == filters['genre'])
-                if filters.get('state') and filters['state'] != 'All USA':
-                    query = query.join(Author).filter(Author.state == filters['state'])
-                if filters.get('min_indie_score'):
-                    query = query.filter(Book.indie_score >= filters['min_indie_score'])
-                if filters.get('start_date'):
-                    query = query.filter(Book.publication_date >= filters['start_date'])
+                if filters.get("genre"):
+                    query = query.filter(Book.genre == filters["genre"])
+                if filters.get("state") and filters["state"] != "All USA":
+                    query = query.join(Author).filter(Author.state == filters["state"])
+                if filters.get("min_indie_score"):
+                    query = query.filter(Book.indie_score >= filters["min_indie_score"])
+                if filters.get("start_date"):
+                    query = query.filter(Book.publication_date >= filters["start_date"])
             query = query.order_by(Book.publication_date.desc()).limit(limit)
             return query.all()
         finally:
@@ -120,12 +120,12 @@ class DatabaseManager:
         result = []
         for b in books:
             result.append({
-                'title': b.title,
-                'author_name': b.author.name if b.author else 'Unknown',
-                'genre': b.genre,
-                'publication_date': b.publication_date.isoformat() if b.publication_date else '',
-                'indie_score': b.indie_score,
-                'amazon_url': b.amazon_url or ''
+                "title": b.title,
+                "author_name": b.author.name if b.author else "Unknown",
+                "genre": b.genre,
+                "publication_date": b.publication_date.isoformat() if b.publication_date else "",
+                "indie_score": b.indie_score,
+                "amazon_url": b.amazon_url or ""
             })
         return result
 
@@ -139,17 +139,18 @@ class DatabaseManager:
     def get_session_raw(self):
         return self.get_session()
 
+# Goodreads books - NO APOSTROPHES!
 GOODREADS_INDIE_BOOKS = [
-    {'title': 'The Indie Authors Guide to Success', 'author': 'Sarah J. Martinez', 'genre': 'Nonfiction', 'year': 2026, 'rating': 4.5, 'url': 'https://www.goodreads.com/book/show/123456'},
-    {'title': 'Shadows of the Forgotten', 'author': 'Michael Chen', 'genre': 'Fantasy', 'year': 2026, 'rating': 4.3, 'url': 'https://www.goodreads.com/book/show/123457'},
-    {'title': 'Love in the Time of AI', 'author': 'Emily R. Thompson', 'genre': 'Romance', 'year': 2026, 'rating': 4.6, 'url': 'https://www.goodreads.com/book/show/123458'},
-    {'title': 'The Last Detective', 'author': 'James O'Brien', 'genre': 'Mystery', 'year': 2026, 'rating': 4.4, 'url': 'https://www.goodreads.com/book/show/123459'},
-    {'title': 'Beyond the Stars', 'author': 'David K. Williams', 'genre': 'Science Fiction', 'year': 2026, 'rating': 4.7, 'url': 'https://www.goodreads.com/book/show/123460'},
-    {'title': 'The Healers Journey', 'author': 'Jessica Anderson', 'genre': 'Fantasy', 'year': 2026, 'rating': 4.5, 'url': 'https://www.goodreads.com/book/show/123461'},
-    {'title': 'Midnight Secrets', 'author': 'Robert Garcia', 'genre': 'Thriller', 'year': 2026, 'rating': 4.2, 'url': 'https://www.goodreads.com/book/show/123462'},
-    {'title': 'The Self-Publishing Revolution', 'author': 'Amanda Lee', 'genre': 'Nonfiction', 'year': 2026, 'rating': 4.8, 'url': 'https://www.goodreads.com/book/show/123463'},
-    {'title': 'Dragons Legacy', 'author': 'Christopher Brown', 'genre': 'Fantasy', 'year': 2026, 'rating': 4.4, 'url': 'https://www.goodreads.com/book/show/123464'},
-    {'title': 'The Indie Marketing Handbook', 'author': 'Nicole Taylor', 'genre': 'Nonfiction', 'year': 2026, 'rating': 4.6, 'url': 'https://www.goodreads.com/book/show/123465'}
+    {"title": "The Indie Authors Guide to Success", "author": "Sarah J. Martinez", "genre": "Nonfiction", "year": 2026, "rating": 4.5, "url": "https://www.goodreads.com/book/show/123456"},
+    {"title": "Shadows of the Forgotten", "author": "Michael Chen", "genre": "Fantasy", "year": 2026, "rating": 4.3, "url": "https://www.goodreads.com/book/show/123457"},
+    {"title": "Love in the Time of AI", "author": "Emily R. Thompson", "genre": "Romance", "year": 2026, "rating": 4.6, "url": "https://www.goodreads.com/book/show/123458"},
+    {"title": "The Last Detective", "author": "James OBrien", "genre": "Mystery", "year": 2026, "rating": 4.4, "url": "https://www.goodreads.com/book/show/123459"},
+    {"title": "Beyond the Stars", "author": "David K. Williams", "genre": "Science Fiction", "year": 2026, "rating": 4.7, "url": "https://www.goodreads.com/book/show/123460"},
+    {"title": "The Healers Journey", "author": "Jessica Anderson", "genre": "Fantasy", "year": 2026, "rating": 4.5, "url": "https://www.goodreads.com/book/show/123461"},
+    {"title": "Midnight Secrets", "author": "Robert Garcia", "genre": "Thriller", "year": 2026, "rating": 4.2, "url": "https://www.goodreads.com/book/show/123462"},
+    {"title": "The Self-Publishing Revolution", "author": "Amanda Lee", "genre": "Nonfiction", "year": 2026, "rating": 4.8, "url": "https://www.goodreads.com/book/show/123463"},
+    {"title": "Dragons Legacy", "author": "Christopher Brown", "genre": "Fantasy", "year": 2026, "rating": 4.4, "url": "https://www.goodreads.com/book/show/123464"},
+    {"title": "The Indie Marketing Handbook", "author": "Nicole Taylor", "genre": "Nonfiction", "year": 2026, "rating": 4.6, "url": "https://www.goodreads.com/book/show/123465"}
 ]
 
 def add_goodreads_books():
@@ -158,7 +159,7 @@ def add_goodreads_books():
     books_added = 0
 
     for book_data in GOODREADS_INDIE_BOOKS:
-        author_name = book_data['author']
+        author_name = book_data["author"]
         existing_author = session.query(Author).filter(func.lower(Author.name) == func.lower(author_name)).first()
 
         if not existing_author:
@@ -169,10 +170,10 @@ def add_goodreads_books():
         else:
             author_id = existing_author.id
 
-        pub_date = date(book_data['year'], random.randint(1, 12), random.randint(1, 28))
-        indie_score = int(book_data['rating'] * 20)
+        pub_date = date(book_data["year"], random.randint(1, 12), random.randint(1, 28))
+        indie_score = int(book_data["rating"] * 20)
 
-        book = Book(title=book_data['title'], author_id=author_id, genre=book_data['genre'], publication_date=pub_date, publication_month=pub_date.strftime("%B"), publication_year=pub_date.year, amazon_url=book_data['url'], publisher="Independently published", publishing_type="Self-Published", source_url=book_data['url'], date_found=date.today(), first_seen=date.today(), last_checked=date.today(), verification_status="Verified Indie", indie_score=indie_score)
+        book = Book(title=book_data["title"], author_id=author_id, genre=book_data["genre"], publication_date=pub_date, publication_month=pub_date.strftime("%B"), publication_year=pub_date.year, amazon_url=book_data["url"], publisher="Independently published", publishing_type="Self-Published", source_url=book_data["url"], date_found=date.today(), first_seen=date.today(), last_checked=date.today(), verification_status="Verified Indie", indie_score=indie_score)
 
         session.add(book)
         session.commit()
@@ -196,4 +197,4 @@ def add_sample_data():
         existing_author = session.query(Author).filter(func.lower(Author.name) == func.lower(author_name)).first()
 
         if not existing_author:
-            author = Author(name=author_name, website=f"https://www.{first_name.lower()}{last_name.lower()}books.com", email=f"contact@{first_name.lower()}{last_name.lower()}books.com", state=random.choice(USA_STATES[1:]), country="USA", ins
+            author = Author(name=author_name, website=f"https://www.{first_name.lower()}{last_name.lower()}books.com", email=f"contact@{first_name.lower()}{last_name.lower()}books.com", state=random
