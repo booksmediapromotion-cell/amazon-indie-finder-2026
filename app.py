@@ -1,12 +1,14 @@
 """
-Indie Author Finder 2026
-Streamlit + SQLite + SQLAlchemy + Google Books API
+Indie Author Finder v16
+Google Books + Open Library
+Streamlit + SQLite + SQLAlchemy
 """
 
 import streamlit as st
 from datetime import date, datetime
 from urllib.parse import quote
 import requests
+import time
 
 from sqlalchemy import (
     create_engine,
@@ -18,13 +20,18 @@ from sqlalchemy import (
     ForeignKey,
     Text,
     func,
-    UniqueConstraint,
+    text,
 )
-from sqlalchemy.orm import declarative_base, sessionmaker, relationship, joinedload
+from sqlalchemy.orm import (
+    declarative_base,
+    sessionmaker,
+    relationship,
+    joinedload,
+)
 
 
 # =========================================================
-# CONFIG
+# PAGE CONFIG
 # =========================================================
 
 st.set_page_config(
@@ -32,6 +39,11 @@ st.set_page_config(
     page_icon="📚",
     layout="wide",
 )
+
+
+# =========================================================
+# OPTIONS
+# =========================================================
 
 USA_STATES = [
     "All Locations",
@@ -44,6 +56,7 @@ USA_STATES = [
     "Colorado",
     "North Carolina",
     "Georgia",
+    "Other",
 ]
 
 GENRES = [
@@ -88,169 +101,387 @@ YEARS = [
 
 
 # =========================================================
-# DATABASE
+# DATABASE MODELS
 # =========================================================
 
 Base = declarative_base()
 
 
 class Author(Base):
+
     __tablename__ = "authors"
 
     id = Column(Integer, primary_key=True)
-    name = Column(String(255), nullable=False)
-    state = Column(String(100), default="")
-    country = Column(String(100), default="USA")
 
-    website = Column(String(500), default="")
-    email = Column(String(255), default="")
-    amazon_author_url = Column(String(500), default="")
+    name = Column(
+        String(255),
+        nullable=False,
+    )
 
-    created_at = Column(DateTime, default=datetime.utcnow)
+    state = Column(
+        String(100),
+        default="",
+    )
 
-    books = relationship(
-        "Book",
-        back_populates="author",
-        cascade="all, delete-orphan",
+    country = Column(
+        String(100),
+        default="USA",
+    )
+
+    website = Column(
+        String(500),
+        default="",
+    )
+
+    email = Column(
+        String(255),
+        default="",
+    )
+
+    amazon_author_url = Column(
+        String(500),
+        default="",
+    )
+
+    created_at = Column(
+        DateTime,
+        default=datetime.utcnow,
     )
 
 
 class Book(Base):
+
     __tablename__ = "books"
 
-    id = Column(Integer, primary_key=True)
+    id = Column(
+        Integer,
+        primary_key=True,
+    )
 
-    # Google Books ID prevents duplicate imports
-    google_book_id = Column(String(255), unique=True, nullable=True)
+    google_book_id = Column(
+        String(255),
+        unique=True,
+        nullable=True,
+    )
 
-    title = Column(String(500), nullable=False)
-    author_id = Column(Integer, ForeignKey("authors.id"), nullable=False)
+    title = Column(
+        String(500),
+        nullable=False,
+    )
 
-    genre = Column(String(100), default="")
-    publication_date = Column(Date, nullable=True)
-    publication_month = Column(String(20), default="")
-    publication_year = Column(Integer, nullable=True)
+    author_id = Column(
+        Integer,
+        ForeignKey("authors.id"),
+        nullable=False,
+    )
 
-    google_books_url = Column(String(500), default="")
-    amazon_url = Column(String(500), default="")
+    genre = Column(
+        String(100),
+        default="",
+    )
 
-    cover_image = Column(String(500), default="")
-    publisher = Column(String(255), default="")
-    description = Column(Text, default="")
+    publication_date = Column(
+        Date,
+        nullable=True,
+    )
 
-    source_url = Column(String(500), default="")
-    date_found = Column(Date, default=date.today)
+    publication_month = Column(
+        String(20),
+        default="",
+    )
 
-    indie_score = Column(Integer, default=0)
+    publication_year = Column(
+        Integer,
+        nullable=True,
+    )
 
-    author = relationship("Author", back_populates="books")
+    google_books_url = Column(
+        String(500),
+        default="",
+    )
 
-    __table_args__ = (
-        UniqueConstraint(
-            "title",
-            "author_id",
-            name="unique_book_author",
-        ),
+    amazon_url = Column(
+        String(500),
+        default="",
+    )
+
+    cover_image = Column(
+        String(500),
+        default="",
+    )
+
+    publisher = Column(
+        String(255),
+        default="",
+    )
+
+    description = Column(
+        Text,
+        default="",
+    )
+
+    source_url = Column(
+        String(500),
+        default="",
+    )
+
+    date_found = Column(
+        Date,
+        default=date.today,
+    )
+
+    indie_score = Column(
+        Integer,
+        default=50,
+    )
+
+    author = relationship(
+        "Author",
+        backref="books",
     )
 
 
 # =========================================================
-# DATABASE CLASS
+# DATABASE
 # =========================================================
 
 class DB:
 
     def __init__(self):
+
         self.engine = create_engine(
             "sqlite:///indie_authors.db",
-            connect_args={"check_same_thread": False},
+            connect_args={
+                "check_same_thread": False
+            },
         )
 
-        Base.metadata.create_all(self.engine)
+        Base.metadata.create_all(
+            self.engine
+        )
 
         self.Session = sessionmaker(
-            bind=self.engine,
-            expire_on_commit=False,
+            bind=self.engine
         )
 
+        self.migrate_database()
+
     def session(self):
+
         return self.Session()
 
+    # -----------------------------------------------------
+    # Automatic SQLite migration
+    # -----------------------------------------------------
+
+    def migrate_database(self):
+
+        with self.engine.begin() as conn:
+
+            # AUTHORS
+            author_columns = {
+                "website": "VARCHAR(500)",
+                "email": "VARCHAR(255)",
+                "amazon_author_url": "VARCHAR(500)",
+            }
+
+            self.add_missing_columns(
+                conn,
+                "authors",
+                author_columns,
+            )
+
+            # BOOKS
+            book_columns = {
+                "google_book_id": "VARCHAR(255)",
+                "publication_date": "DATE",
+                "publication_month": "VARCHAR(20)",
+                "publication_year": "INTEGER",
+                "google_books_url": "VARCHAR(500)",
+                "amazon_url": "VARCHAR(500)",
+                "cover_image": "VARCHAR(500)",
+                "publisher": "VARCHAR(255)",
+                "description": "TEXT",
+                "source_url": "VARCHAR(500)",
+                "date_found": "DATE",
+                "indie_score": "INTEGER",
+            }
+
+            self.add_missing_columns(
+                conn,
+                "books",
+                book_columns,
+            )
+
+    def add_missing_columns(
+        self,
+        conn,
+        table_name,
+        columns,
+    ):
+
+        result = conn.execute(
+            text(
+                f"PRAGMA table_info({table_name})"
+            )
+        )
+
+        existing = {
+            row[1]
+            for row in result.fetchall()
+        }
+
+        for column_name, column_type in columns.items():
+
+            if column_name not in existing:
+
+                try:
+
+                    conn.execute(
+                        text(
+                            f"ALTER TABLE "
+                            f"{table_name} "
+                            f"ADD COLUMN "
+                            f"{column_name} "
+                            f"{column_type}"
+                        )
+                    )
+
+                except Exception:
+                    pass
+
+    # -----------------------------------------------------
+    # Counts
+    # -----------------------------------------------------
+
     def count_books(self):
+
         s = self.session()
 
         try:
-            return s.query(func.count(Book.id)).scalar() or 0
+
+            return (
+                s.query(
+                    func.count(Book.id)
+                ).scalar()
+                or 0
+            )
 
         finally:
+
             s.close()
 
     def count_authors(self):
+
         s = self.session()
 
         try:
-            return s.query(func.count(Author.id)).scalar() or 0
+
+            return (
+                s.query(
+                    func.count(Author.id)
+                ).scalar()
+                or 0
+            )
 
         finally:
+
             s.close()
 
+    # -----------------------------------------------------
+    # Clear
+    # -----------------------------------------------------
+
     def clear(self):
+
         s = self.session()
 
         try:
+
             s.query(Book).delete()
+
             s.query(Author).delete()
 
             s.commit()
 
         except Exception:
+
             s.rollback()
+
             raise
 
         finally:
+
             s.close()
 
-    def book_exists(self, google_book_id=None, title=None, author_name=None):
+    # -----------------------------------------------------
+    # Check duplicate
+    # -----------------------------------------------------
+
+    def book_exists(
+        self,
+        google_book_id=None,
+        title=None,
+        author_name=None,
+    ):
 
         s = self.session()
 
         try:
 
             if google_book_id:
-                existing = (
+
+                found = (
                     s.query(Book)
-                    .filter(Book.google_book_id == google_book_id)
-                    .first()
-                )
-
-                if existing:
-                    return True
-
-            if title and author_name:
-
-                existing = (
-                    s.query(Book)
-                    .join(Author)
                     .filter(
-                        func.lower(Book.title) == func.lower(title),
-                        func.lower(Author.name) == func.lower(author_name),
+                        Book.google_book_id
+                        == google_book_id
                     )
                     .first()
                 )
 
-                if existing:
+                if found:
+                    return True
+
+            if title and author_name:
+
+                found = (
+                    s.query(Book)
+                    .join(Author)
+                    .filter(
+                        func.lower(
+                            Book.title
+                        )
+                        == func.lower(title),
+
+                        func.lower(
+                            Author.name
+                        )
+                        == func.lower(
+                            author_name
+                        ),
+                    )
+                    .first()
+                )
+
+                if found:
                     return True
 
             return False
 
         finally:
+
             s.close()
+
+    # -----------------------------------------------------
+    # Add book
+    # -----------------------------------------------------
 
     def add_book(
         self,
         title,
         author_name,
-        genre,
+        genre="",
         year=None,
         url="",
         image="",
@@ -264,32 +495,35 @@ class DB:
 
         try:
 
-            # -------------------------------------------------
-            # Check duplicate
-            # -------------------------------------------------
-
+            # Google ID duplicate
             if google_book_id:
 
                 existing = (
                     s.query(Book)
                     .filter(
-                        Book.google_book_id == google_book_id
+                        Book.google_book_id
+                        == google_book_id
                     )
                     .first()
                 )
 
                 if existing:
-                    return False, "Book already exists."
 
-            # -------------------------------------------------
-            # Find/create author
-            # -------------------------------------------------
+                    return (
+                        False,
+                        "Book already exists."
+                    )
 
+            # Find author
             author = (
                 s.query(Author)
                 .filter(
-                    func.lower(Author.name)
-                    == func.lower(author_name)
+                    func.lower(
+                        Author.name
+                    )
+                    == func.lower(
+                        author_name
+                    )
                 )
                 .first()
             )
@@ -303,55 +537,59 @@ class DB:
                 )
 
                 s.add(author)
+
                 s.flush()
 
-            # -------------------------------------------------
-            # Second duplicate check
-            # -------------------------------------------------
-
+            # Title + author duplicate
             existing = (
                 s.query(Book)
                 .filter(
-                    Book.title == title,
-                    Book.author_id == author.id,
+                    func.lower(
+                        Book.title
+                    )
+                    == func.lower(title),
+
+                    Book.author_id
+                    == author.id,
                 )
                 .first()
             )
 
             if existing:
-                return False, "Book already exists."
 
-            # -------------------------------------------------
+                return (
+                    False,
+                    "Book already exists."
+                )
+
             # Publication date
-            # -------------------------------------------------
-
             pub_date = publication_date
 
             if pub_date is None and year:
+
                 try:
-                    pub_date = date(int(year), 1, 1)
+
+                    pub_date = date(
+                        int(year),
+                        1,
+                        1,
+                    )
+
                 except Exception:
+
                     pub_date = None
 
-            publication_month = ""
+            pub_month = ""
 
             if pub_date:
-                publication_month = pub_date.strftime("%B")
 
-            # -------------------------------------------------
-            # Indie score
-            #
-            # We do NOT generate a fake random score.
-            # Google Books alone cannot prove self-publishing.
-            # -------------------------------------------------
+                pub_month = (
+                    pub_date.strftime("%B")
+                )
 
             score = calculate_indie_score(
-                publisher=publisher
+                publisher
             )
-
-            # -------------------------------------------------
-            # Create book
-            # -------------------------------------------------
 
             book = Book(
                 google_book_id=google_book_id,
@@ -359,14 +597,17 @@ class DB:
                 author_id=author.id,
                 genre=genre,
                 publication_date=pub_date,
-                publication_month=publication_month,
+                publication_month=pub_month,
                 publication_year=(
                     pub_date.year
                     if pub_date
                     else year
                 ),
                 google_books_url=url,
-                amazon_url="",
+                amazon_url=amazon_search_url(
+                    title,
+                    author_name,
+                ),
                 cover_image=image,
                 publisher=publisher,
                 description=description,
@@ -376,18 +617,30 @@ class DB:
             )
 
             s.add(book)
+
             s.commit()
 
-            return True, "Book added successfully."
+            return (
+                True,
+                "Book added."
+            )
 
         except Exception as e:
 
             s.rollback()
 
-            return False, str(e)
+            return (
+                False,
+                str(e)
+            )
 
         finally:
+
             s.close()
+
+    # -----------------------------------------------------
+    # Get books
+    # -----------------------------------------------------
 
     def get_books(
         self,
@@ -404,7 +657,11 @@ class DB:
 
             q = (
                 s.query(Book)
-                .options(joinedload(Book.author))
+                .options(
+                    joinedload(
+                        Book.author
+                    )
+                )
             )
 
             if genre != "All Genres":
@@ -416,22 +673,27 @@ class DB:
             if location != "All Locations":
 
                 q = (
-                    q.join(Book.author)
+                    q.join(
+                        Book.author
+                    )
                     .filter(
-                        Author.state == location
+                        Author.state
+                        == location
                     )
                 )
 
             if month != "All Months":
 
                 q = q.filter(
-                    Book.publication_month == month
+                    Book.publication_month
+                    == month
                 )
 
             if year != "All Years":
 
                 q = q.filter(
-                    Book.publication_year == int(year)
+                    Book.publication_year
+                    == int(year)
                 )
 
             q = (
@@ -444,6 +706,7 @@ class DB:
             return q.all()
 
         finally:
+
             s.close()
 
 
@@ -451,19 +714,17 @@ class DB:
 # INDIE SCORE
 # =========================================================
 
-def calculate_indie_score(publisher=""):
-
-    """
-    This is only a basic publisher-based score.
-    It does NOT prove an author is self-published.
-    """
+def calculate_indie_score(
+    publisher=""
+):
 
     if not publisher:
+
         return 50
 
-    publisher_lower = publisher.lower()
+    publisher = publisher.lower()
 
-    large_publishers = [
+    major_publishers = [
         "penguin",
         "random house",
         "harpercollins",
@@ -475,22 +736,26 @@ def calculate_indie_score(publisher=""):
         "cambridge university press",
     ]
 
-    for publisher_name in large_publishers:
+    for name in major_publishers:
 
-        if publisher_name in publisher_lower:
+        if name in publisher:
+
             return 20
 
     independent_terms = [
         "independent",
+        "indie",
+        "self",
+        "author",
         "publishing",
         "press",
         "books",
-        "publishing house",
     ]
 
     for term in independent_terms:
 
-        if term in publisher_lower:
+        if term in publisher:
+
             return 65
 
     return 50
@@ -500,9 +765,10 @@ def calculate_indie_score(publisher=""):
 # DATE PARSER
 # =========================================================
 
-def parse_publication_date(value):
+def parse_date(value):
 
     if not value:
+
         return None
 
     value = str(value).strip()
@@ -517,174 +783,26 @@ def parse_publication_date(value):
 
         try:
 
-            parsed = datetime.strptime(
+            return datetime.strptime(
                 value,
                 fmt,
             ).date()
 
-            return parsed
-
         except ValueError:
+
             continue
 
     return None
 
 
 # =========================================================
-# GOOGLE BOOKS API
-# =========================================================
-
-def fetch_books_from_api(
-    genre="Fiction",
-    year=2026,
-    max_results=20,
-):
-
-    url = "https://www.googleapis.com/books/v1/volumes"
-
-    query = f"{genre} books {year}"
-
-    params = {
-        "q": query,
-        "maxResults": min(max_results, 40),
-        "orderBy": "newest",
-        "printType": "books",
-    }
-
-    try:
-
-        response = requests.get(
-            url,
-            params=params,
-            timeout=20,
-            headers={
-                "User-Agent": "IndieAuthorFinder/2026"
-            },
-        )
-
-        response.raise_for_status()
-
-        data = response.json()
-
-        books = []
-
-        for item in data.get("items", []):
-
-            volume_info = item.get(
-                "volumeInfo",
-                {}
-            )
-
-            title = volume_info.get(
-                "title",
-                ""
-            ).strip()
-
-            authors = volume_info.get(
-                "authors",
-                []
-            )
-
-            if not title or not authors:
-                continue
-
-            author = authors[0].strip()
-
-            published_raw = volume_info.get(
-                "publishedDate",
-                ""
-            )
-
-            publication_date = parse_publication_date(
-                published_raw
-            )
-
-            actual_year = (
-                publication_date.year
-                if publication_date
-                else year
-            )
-
-            # -------------------------------------------------
-            # Keep only books matching requested year
-            # when Google gives us an actual year.
-            # -------------------------------------------------
-
-            if publication_date:
-
-                if publication_date.year != int(year):
-
-                    continue
-
-            image_links = volume_info.get(
-                "imageLinks",
-                {}
-            )
-
-            image = (
-                image_links.get("thumbnail")
-                or image_links.get("smallThumbnail")
-                or ""
-            )
-
-            # Google sometimes gives http image URLs.
-            if image.startswith("http://"):
-                image = image.replace(
-                    "http://",
-                    "https://",
-                    1,
-                )
-
-            info_link = volume_info.get(
-                "infoLink",
-                ""
-            )
-
-            books.append(
-                {
-                    "id": item.get("id", ""),
-                    "title": title,
-                    "author": author,
-                    "year": actual_year,
-                    "genre": genre,
-                    "url": info_link,
-                    "image": image,
-                    "publisher": volume_info.get(
-                        "publisher",
-                        "",
-                    ),
-                    "description": volume_info.get(
-                        "description",
-                        "",
-                    ),
-                    "publication_date": publication_date,
-                }
-            )
-
-        return books, None
-
-    except requests.exceptions.Timeout:
-
-        return [], "Google Books request timed out."
-
-    except requests.exceptions.RequestException as e:
-
-        return [], f"Google Books API error: {e}"
-
-    except ValueError:
-
-        return [], "Google Books returned invalid JSON."
-
-    except Exception as e:
-
-        return [], f"Unexpected error: {e}"
-
-
-# =========================================================
 # AMAZON SEARCH
 # =========================================================
 
-def amazon_search_url(title, author):
+def amazon_search_url(
+    title,
+    author,
+):
 
     query = quote(
         f"{title} {author}"
@@ -697,23 +815,534 @@ def amazon_search_url(title, author):
 
 
 # =========================================================
+# GOOGLE BOOKS
+# =========================================================
+
+@st.cache_data(
+    ttl=3600,
+    show_spinner=False,
+)
+def google_books_search(
+    genre,
+    year,
+    max_results=20,
+):
+
+    url = (
+        "https://www.googleapis.com/"
+        "books/v1/volumes"
+    )
+
+    query = (
+        f"{genre} books {year}"
+    )
+
+    params = {
+        "q": query,
+        "maxResults": min(
+            max_results,
+            40,
+        ),
+        "orderBy": "newest",
+        "printType": "books",
+    }
+
+    headers = {
+        "User-Agent":
+            "Mozilla/5.0 "
+            "(compatible; "
+            "IndieAuthorFinder/16.0)"
+    }
+
+    for attempt in range(3):
+
+        try:
+
+            response = requests.get(
+                url,
+                params=params,
+                headers=headers,
+                timeout=20,
+            )
+
+            # Rate limited
+            if response.status_code == 429:
+
+                if attempt < 2:
+
+                    time.sleep(
+                        2 ** attempt
+                    )
+
+                    continue
+
+                return (
+                    [],
+                    "Google Books is temporarily rate-limiting requests."
+                )
+
+            response.raise_for_status()
+
+            data = response.json()
+
+            books = []
+
+            for item in data.get(
+                "items",
+                [],
+            ):
+
+                info = item.get(
+                    "volumeInfo",
+                    {},
+                )
+
+                title = (
+                    info.get(
+                        "title",
+                        ""
+                    )
+                    .strip()
+                )
+
+                authors = info.get(
+                    "authors",
+                    [],
+                )
+
+                if not title or not authors:
+
+                    continue
+
+                author = (
+                    authors[0]
+                    .strip()
+                )
+
+                raw_date = info.get(
+                    "publishedDate",
+                    "",
+                )
+
+                pub_date = parse_date(
+                    raw_date
+                )
+
+                actual_year = (
+                    pub_date.year
+                    if pub_date
+                    else year
+                )
+
+                # If Google gives actual
+                # year, make sure it matches
+                if pub_date:
+
+                    if (
+                        pub_date.year
+                        != int(year)
+                    ):
+
+                        continue
+
+                images = info.get(
+                    "imageLinks",
+                    {},
+                )
+
+                image = (
+                    images.get(
+                        "thumbnail"
+                    )
+                    or images.get(
+                        "smallThumbnail"
+                    )
+                    or ""
+                )
+
+                if image.startswith(
+                    "http://"
+                ):
+
+                    image = image.replace(
+                        "http://",
+                        "https://",
+                        1,
+                    )
+
+                books.append(
+                    {
+                        "id":
+                            item.get(
+                                "id",
+                                "",
+                            ),
+
+                        "title":
+                            title,
+
+                        "author":
+                            author,
+
+                        "year":
+                            actual_year,
+
+                        "genre":
+                            genre,
+
+                        "url":
+                            info.get(
+                                "infoLink",
+                                "",
+                            ),
+
+                        "image":
+                            image,
+
+                        "publisher":
+                            info.get(
+                                "publisher",
+                                "",
+                            ),
+
+                        "description":
+                            info.get(
+                                "description",
+                                "",
+                            ),
+
+                        "publication_date":
+                            pub_date,
+                    }
+                )
+
+            return books, None
+
+        except requests.exceptions.Timeout:
+
+            if attempt < 2:
+
+                time.sleep(
+                    2 ** attempt
+                )
+
+                continue
+
+            return (
+                [],
+                "Google Books request timed out."
+            )
+
+        except requests.exceptions.RequestException as e:
+
+            return (
+                [],
+                f"Google Books error: {e}"
+            )
+
+        except Exception as e:
+
+            return (
+                [],
+                f"Google Books error: {e}"
+            )
+
+    return [], "Google Books unavailable."
+
+
+# =========================================================
+# OPEN LIBRARY
+# =========================================================
+
+@st.cache_data(
+    ttl=3600,
+    show_spinner=False,
+)
+def open_library_search(
+    genre,
+    year,
+    max_results=20,
+):
+
+    url = (
+        "https://openlibrary.org/"
+        "search.json"
+    )
+
+    params = {
+        "q": f"{genre} {year}",
+        "limit": min(
+            max_results,
+            100,
+        ),
+        "sort": "new",
+    }
+
+    headers = {
+        "User-Agent":
+            "IndieAuthorFinder/16.0"
+    }
+
+    try:
+
+        response = requests.get(
+            url,
+            params=params,
+            headers=headers,
+            timeout=20,
+        )
+
+        response.raise_for_status()
+
+        data = response.json()
+
+        books = []
+
+        for item in data.get(
+            "docs",
+            [],
+        ):
+
+            title = (
+                item.get(
+                    "title",
+                    ""
+                )
+                or ""
+            ).strip()
+
+            authors = item.get(
+                "author_name",
+                [],
+            )
+
+            if not title or not authors:
+
+                continue
+
+            author = (
+                authors[0]
+                .strip()
+            )
+
+            first_publish_year = (
+                item.get(
+                    "first_publish_year"
+                )
+            )
+
+            if (
+                first_publish_year
+                and int(first_publish_year)
+                != int(year)
+            ):
+
+                continue
+
+            # Cover
+            cover_id = item.get(
+                "cover_i"
+            )
+
+            image = ""
+
+            if cover_id:
+
+                image = (
+                    "https://covers.openlibrary.org/"
+                    f"b/id/{cover_id}-M.jpg"
+                )
+
+            # ISBN
+            isbns = item.get(
+                "isbn",
+                []
+            )
+
+            isbn = (
+                isbns[0]
+                if isbns
+                else ""
+            )
+
+            books.append(
+                {
+                    "id":
+                        f"openlibrary_{isbn or quote(title)}",
+
+                    "title":
+                        title,
+
+                    "author":
+                        author,
+
+                    "year":
+                        first_publish_year
+                        or year,
+
+                    "genre":
+                        genre,
+
+                    "url":
+                        (
+                            "https://openlibrary.org"
+                            + item.get(
+                                "key",
+                                "",
+                            )
+                        ),
+
+                    "image":
+                        image,
+
+                    "publisher":
+                        (
+                            item.get(
+                                "publisher",
+                                [""],
+                            )
+                            or [""]
+                        )[0],
+
+                    "description":
+                        "",
+
+                    "publication_date":
+                        (
+                            date(
+                                int(
+                                    first_publish_year
+                                ),
+                                1,
+                                1,
+                            )
+                            if first_publish_year
+                            else None
+                        ),
+                }
+            )
+
+        return books, None
+
+    except requests.exceptions.Timeout:
+
+        return (
+            [],
+            "Open Library request timed out."
+        )
+
+    except requests.exceptions.RequestException as e:
+
+        return (
+            [],
+            f"Open Library error: {e}"
+        )
+
+    except Exception as e:
+
+        return (
+            [],
+            f"Open Library error: {e}"
+        )
+
+
+# =========================================================
+# COMBINED SEARCH
+# =========================================================
+
+def fetch_books(
+    genre,
+    year,
+    max_results=20,
+):
+
+    # ---------------------------------------------
+    # Try Google first
+    # ---------------------------------------------
+
+    google_books, google_error = (
+        google_books_search(
+            genre,
+            year,
+            max_results,
+        )
+    )
+
+    if google_books:
+
+        return (
+            google_books,
+            "Google Books",
+            None,
+        )
+
+    # ---------------------------------------------
+    # Google failed / 429
+    # Try Open Library
+    # ---------------------------------------------
+
+    open_books, open_error = (
+        open_library_search(
+            genre,
+            year,
+            max_results,
+        )
+    )
+
+    if open_books:
+
+        return (
+            open_books,
+            "Open Library",
+            google_error,
+        )
+
+    return (
+        [],
+        None,
+        (
+            google_error
+            or open_error
+            or "No books found."
+        ),
+    )
+
+
+# =========================================================
 # SESSION STATE
 # =========================================================
 
-if "fetched_books" not in st.session_state:
+if (
+    "fetched_books"
+    not in st.session_state
+):
 
     st.session_state.fetched_books = []
+
+if (
+    "source_name"
+    not in st.session_state
+):
+
+    st.session_state.source_name = ""
+
+
+# =========================================================
+# DATABASE
+# =========================================================
+
+db = DB()
 
 
 # =========================================================
 # SIDEBAR
 # =========================================================
 
-db = DB()
-
 with st.sidebar:
 
-    st.markdown("## 📚 Indie Finder")
+    st.markdown(
+        "## 📚 Indie Finder"
+    )
 
     st.divider()
 
@@ -729,8 +1358,22 @@ with st.sidebar:
 
     st.divider()
 
+    st.markdown(
+        "**Data Sources**"
+    )
+
+    st.write(
+        "✓ Google Books"
+    )
+
+    st.write(
+        "✓ Open Library fallback"
+    )
+
+    st.divider()
+
     if st.button(
-        "🗑️ Clear All Data",
+        "🗑️ Clear Database",
         use_container_width=True,
     ):
 
@@ -738,7 +1381,9 @@ with st.sidebar:
 
         st.session_state.fetched_books = []
 
-        st.success("Database cleared.")
+        st.success(
+            "Database cleared."
+        )
 
         st.rerun()
 
@@ -747,10 +1392,12 @@ with st.sidebar:
 # HEADER
 # =========================================================
 
-st.title("📚 Indie Author Finder")
+st.title(
+    "📚 Indie Author Finder"
+)
 
 st.caption(
-    "Discover books through Google Books and build a local author database."
+    "Discover books and build a local author database."
 )
 
 
@@ -758,7 +1405,9 @@ st.caption(
 # FILTERS
 # =========================================================
 
-st.subheader("🔍 Search Filters")
+st.subheader(
+    "🔍 Search Filters"
+)
 
 c1, c2, c3, c4 = st.columns(4)
 
@@ -795,73 +1444,82 @@ st.divider()
 
 
 # =========================================================
-# FETCH
+# FETCH BUTTON
 # =========================================================
 
 if st.button(
-    "📖 Fetch Books from Google",
+    "📖 Find Books",
     type="primary",
     use_container_width=True,
 ):
 
-    year_val = (
+    search_year = (
         2026
         if year_f == "All Years"
         else int(year_f)
     )
 
-    genre_val = (
+    search_genre = (
         "Fiction"
         if genre_f == "All Genres"
         else genre_f
     )
 
     with st.spinner(
-        "Searching Google Books..."
+        "Searching book databases..."
     ):
 
-        books, error = fetch_books_from_api(
-            genre=genre_val,
-            year=year_val,
-            max_results=20,
+        books, source, error = fetch_books(
+            search_genre,
+            search_year,
+            20,
         )
 
-    if error:
-
-        st.error(error)
-
-    elif books:
+    if books:
 
         st.session_state.fetched_books = books
 
-        st.success(
-            f"Found {len(books)} books."
+        st.session_state.source_name = (
+            source
         )
+
+        st.success(
+            f"Found {len(books)} books "
+            f"using {source}."
+        )
+
+        if error:
+
+            st.info(
+                "Google Books was unavailable, "
+                "so Open Library was used instead."
+            )
 
     else:
 
         st.session_state.fetched_books = []
 
-        st.warning(
-            "No matching books were found. "
-            "Try another genre or year."
+        st.error(
+            error
+            or "No books were found."
         )
 
 
 # =========================================================
-# FETCHED BOOKS
+# SEARCH RESULTS
 # =========================================================
 
-if st.session_state.fetched_books:
+books = st.session_state.fetched_books
 
-    books = st.session_state.fetched_books
+if books:
 
     st.subheader(
-        f"🔎 Google Results ({len(books)})"
+        f"🔎 Search Results — "
+        f"{st.session_state.source_name}"
     )
 
     # -----------------------------------------------------
-    # Add all
+    # Add All
     # -----------------------------------------------------
 
     if st.button(
@@ -874,30 +1532,37 @@ if st.session_state.fetched_books:
 
         progress = st.progress(0)
 
-        for index, bk in enumerate(books):
+        for i, book in enumerate(
+            books
+        ):
 
-            success, message = db.add_book(
-                title=bk["title"],
-                author_name=bk["author"],
-                genre=bk["genre"],
-                year=bk["year"],
-                url=bk["url"],
-                image=bk["image"],
-                publisher=bk["publisher"],
-                description=bk["description"],
-                google_book_id=bk["id"],
-                publication_date=bk[
-                    "publication_date"
-                ],
+            success, message = (
+                db.add_book(
+                    title=book["title"],
+                    author_name=book["author"],
+                    genre=book["genre"],
+                    year=book["year"],
+                    url=book["url"],
+                    image=book["image"],
+                    publisher=book["publisher"],
+                    description=book["description"],
+                    google_book_id=book["id"],
+                    publication_date=book[
+                        "publication_date"
+                    ],
+                )
             )
 
             if success:
+
                 added += 1
+
             else:
+
                 skipped += 1
 
             progress.progress(
-                (index + 1) / len(books)
+                (i + 1) / len(books)
             )
 
         st.success(
@@ -905,17 +1570,25 @@ if st.session_state.fetched_books:
         )
 
         if skipped:
+
             st.info(
-                f"{skipped} duplicate books were skipped."
+                f"Skipped {skipped} "
+                f"duplicate books."
             )
+
+        time.sleep(0.5)
+
+        st.rerun()
 
     st.divider()
 
     # -----------------------------------------------------
-    # Individual books
+    # Individual results
     # -----------------------------------------------------
 
-    for index, bk in enumerate(books):
+    for i, book in enumerate(
+        books
+    ):
 
         with st.container():
 
@@ -925,12 +1598,12 @@ if st.session_state.fetched_books:
 
             with col1:
 
-                if bk.get("image"):
+                if book.get("image"):
 
                     try:
 
                         st.image(
-                            bk["image"],
+                            book["image"],
                             width=100,
                         )
 
@@ -945,83 +1618,124 @@ if st.session_state.fetched_books:
             with col2:
 
                 st.markdown(
-                    f"### {bk['title']}"
+                    f"### {book['title']}"
                 )
 
                 st.write(
-                    f"**Author:** {bk['author']}"
+                    f"**Author:** "
+                    f"{book['author']}"
                 )
 
                 st.write(
-                    f"**Genre:** {bk['genre']}"
+                    f"**Genre:** "
+                    f"{book['genre']}"
                 )
 
                 st.write(
-                    f"**Publication Year:** {bk['year']}"
+                    f"**Year:** "
+                    f"{book['year']}"
                 )
 
-                if bk.get("publisher"):
+                if book.get(
+                    "publisher"
+                ):
 
                     st.write(
                         f"**Publisher:** "
-                        f"{bk['publisher']}"
+                        f"{book['publisher']}"
                     )
 
-                if bk.get("publication_date"):
+                if book.get(
+                    "publication_date"
+                ):
 
                     st.write(
-                        "**Publication Date:** "
-                        f"{bk['publication_date'].strftime('%B %d, %Y')}"
+                        "**Published:** "
+                        f"{book['publication_date'].strftime('%B %d, %Y')}"
                     )
 
-                col_a, col_b, col_c = st.columns(3)
+                a, b, c = st.columns(
+                    3
+                )
 
-                with col_a:
+                with a:
 
-                    if bk.get("url"):
+                    if book.get(
+                        "url"
+                    ):
 
                         st.link_button(
-                            "Google Books",
-                            bk["url"],
+                            "📖 Book Page",
+                            book["url"],
                         )
 
-                with col_b:
+                with b:
 
                     st.link_button(
-                        "Amazon Search",
+                        "🛒 Amazon",
                         amazon_search_url(
-                            bk["title"],
-                            bk["author"],
+                            book["title"],
+                            book["author"],
                         ),
                     )
 
-                with col_c:
+                with c:
 
                     if st.button(
                         "➕ Add",
-                        key=f"add_book_{index}_{bk['id']}",
+                        key=(
+                            f"add_"
+                            f"{i}_"
+                            f"{book['id']}"
+                        ),
                     ):
 
-                        success, message = db.add_book(
-                            title=bk["title"],
-                            author_name=bk["author"],
-                            genre=bk["genre"],
-                            year=bk["year"],
-                            url=bk["url"],
-                            image=bk["image"],
-                            publisher=bk["publisher"],
-                            description=bk["description"],
-                            google_book_id=bk["id"],
-                            publication_date=bk[
-                                "publication_date"
-                            ],
+                        success, message = (
+                            db.add_book(
+                                title=book[
+                                    "title"
+                                ],
+                                author_name=book[
+                                    "author"
+                                ],
+                                genre=book[
+                                    "genre"
+                                ],
+                                year=book[
+                                    "year"
+                                ],
+                                url=book[
+                                    "url"
+                                ],
+                                image=book[
+                                    "image"
+                                ],
+                                publisher=book[
+                                    "publisher"
+                                ],
+                                description=book[
+                                    "description"
+                                ],
+                                google_book_id=book[
+                                    "id"
+                                ],
+                                publication_date=book[
+                                    "publication_date"
+                                ],
+                            )
                         )
 
                         if success:
 
                             st.success(
-                                "Book added."
+                                "Added!"
                             )
+
+                            time.sleep(
+                                0.3
+                            )
+
+                            st.rerun()
 
                         else:
 
@@ -1033,146 +1747,190 @@ if st.session_state.fetched_books:
 
 
 # =========================================================
-# DATABASE RESULTS
+# DATABASE
 # =========================================================
 
-st.subheader("📚 Books in Database")
-
-db = DB()
-
-database_books = db.get_books(
-    genre=genre_f,
-    location=location_f,
-    month=month_f,
-    year=year_f,
-    limit=100,
+st.subheader(
+    "📚 Books in Database"
 )
 
-st.write(
-    f"**Results: {len(database_books)} books**"
-)
+try:
 
-
-if not database_books:
-
-    st.info(
-        "No books match your current filters."
+    database_books = (
+        db.get_books(
+            genre=genre_f,
+            location=location_f,
+            month=month_f,
+            year=year_f,
+            limit=100,
+        )
     )
 
-else:
+    st.write(
+        f"**Results: "
+        f"{len(database_books)} books**"
+    )
 
-    for index, book in enumerate(
-        database_books
-    ):
+    if not database_books:
 
-        with st.container():
+        st.info(
+            "No books match your "
+            "current filters."
+        )
 
-            col1, col2 = st.columns(
-                [1, 5]
-            )
+    else:
 
-            with col1:
+        for book in database_books:
 
-                if book.cover_image:
+            with st.container():
 
-                    try:
+                col1, col2 = st.columns(
+                    [1, 5]
+                )
 
-                        st.image(
-                            book.cover_image,
-                            width=100,
-                        )
+                with col1:
 
-                    except Exception:
+                    if book.cover_image:
+
+                        try:
+
+                            st.image(
+                                book.cover_image,
+                                width=100,
+                            )
+
+                        except Exception:
+
+                            st.write("📖")
+
+                    else:
 
                         st.write("📖")
 
-                else:
+                with col2:
 
-                    st.write("📖")
-
-            with col2:
-
-                st.markdown(
-                    f"### {book.title}"
-                )
-
-                author_name = (
-                    book.author.name
-                    if book.author
-                    else "Unknown"
-                )
-
-                author_state = (
-                    book.author.state
-                    if book.author
-                    and book.author.state
-                    else "Location unknown"
-                )
-
-                st.write(
-                    f"**Author:** {author_name}"
-                )
-
-                st.write(
-                    f"**Location:** {author_state}"
-                )
-
-                st.write(
-                    f"**Genre:** {book.genre or 'Unknown'}"
-                )
-
-                if book.publication_date:
-
-                    st.write(
-                        "**Published:** "
-                        f"{book.publication_date.strftime('%B %d, %Y')}"
+                    st.markdown(
+                        f"### {book.title}"
                     )
 
-                elif book.publication_year:
+                    if book.author:
 
-                    st.write(
-                        f"**Published:** {book.publication_year}"
-                    )
-
-                if book.publisher:
-
-                    st.write(
-                        f"**Publisher:** {book.publisher}"
-                    )
-
-                st.write(
-                    f"**Indie Score:** "
-                    f"{book.indie_score}/100"
-                )
-
-                col_a, col_b = st.columns(2)
-
-                with col_a:
-
-                    if book.google_books_url:
-
-                        st.link_button(
-                            "Google Books",
-                            book.google_books_url,
+                        author_name = (
+                            book.author.name
                         )
 
-                with col_b:
+                        author_state = (
+                            book.author.state
+                            or
+                            "Location unknown"
+                        )
 
-                    st.link_button(
-                        "Amazon Search",
-                        amazon_search_url(
-                            book.title,
-                            author_name,
-                        ),
+                    else:
+
+                        author_name = (
+                            "Unknown"
+                        )
+
+                        author_state = (
+                            "Location unknown"
+                        )
+
+                    st.write(
+                        f"**Author:** "
+                        f"{author_name}"
                     )
 
-            st.divider()
+                    st.write(
+                        f"**Location:** "
+                        f"{author_state}"
+                    )
+
+                    if book.genre:
+
+                        st.write(
+                            f"**Genre:** "
+                            f"{book.genre}"
+                        )
+
+                    if (
+                        book.publication_date
+                    ):
+
+                        st.write(
+                            "**Published:** "
+                            f"{book.publication_date.strftime('%B %d, %Y')}"
+                        )
+
+                    elif (
+                        book.publication_year
+                    ):
+
+                        st.write(
+                            "**Published:** "
+                            f"{book.publication_year}"
+                        )
+
+                    if book.publisher:
+
+                        st.write(
+                            f"**Publisher:** "
+                            f"{book.publisher}"
+                        )
+
+                    st.write(
+                        f"**Indie Score:** "
+                        f"{book.indie_score}/100"
+                    )
+
+                    a, b = st.columns(2)
+
+                    with a:
+
+                        if (
+                            book.google_books_url
+                        ):
+
+                            st.link_button(
+                                "📖 Book Page",
+                                book.google_books_url,
+                            )
+
+                    with b:
+
+                        st.link_button(
+                            "🛒 Amazon",
+                            amazon_search_url(
+                                book.title,
+                                author_name,
+                            ),
+                        )
+
+                st.divider()
+
+except Exception as e:
+
+    st.error(
+        "The database could not be loaded."
+    )
+
+    st.code(
+        str(e)
+    )
+
+    st.info(
+        "The app was prevented from crashing. "
+        "Check your database schema or "
+        "redeploy the application."
+    )
 
 
 # =========================================================
 # FOOTER
 # =========================================================
 
+st.divider()
+
 st.caption(
-    "Indie Author Finder v15.0"
+    "Indie Author Finder v16.0 • "
+    "Google Books + Open Library"
 )
