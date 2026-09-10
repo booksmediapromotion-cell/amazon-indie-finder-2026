@@ -1,331 +1,188 @@
 """
-Amazon Indie Author Finder 2026 - GOOGLE BOOKS API
-Free API, works reliably, real books
+Indie Author Finder 2026 - Clean Version
 """
 import streamlit as st
 from datetime import date, datetime
 import pandas as pd
-from sqlalchemy import create_engine
-from sqlalchemy import Column, Integer, String, Date, DateTime, ForeignKey, func
+from sqlalchemy import create_engine, Column, Integer, String, Date, DateTime, ForeignKey, func
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship, joinedload
 import requests
 import random
 
-USA_STATES = [
-    "All USA", "California", "Texas", "New York", "Florida", "Washington",
-    "Oregon", "Colorado", "North Carolina", "Georgia", "Illinois"
-]
+USA_STATES = ["All USA", "California", "Texas", "New York", "Florida"]
 
 Base = declarative_base()
 
 class Author(Base):
     __tablename__ = "authors"
     id = Column(Integer, primary_key=True)
-    name = Column(String(255), nullable=False, index=True)
-    website = Column(String(500))
-    email = Column(String(255))
-    state = Column(String(100), index=True)
+    name = Column(String(255), nullable=False)
+    state = Column(String(100))
     country = Column(String(100), default="USA")
     created_at = Column(DateTime, default=datetime.utcnow)
 
 class Book(Base):
     __tablename__ = "books"
     id = Column(Integer, primary_key=True)
-    title = Column(String(500), nullable=False, index=True)
+    title = Column(String(500), nullable=False)
     author_id = Column(Integer, ForeignKey("authors.id"), nullable=False)
-    genre = Column(String(100), index=True)
-    publication_date = Column(Date, nullable=False, index=True)
+    genre = Column(String(100))
+    publication_date = Column(Date, nullable=False)
     publication_month = Column(String(20))
-    publication_year = Column(Integer, nullable=False, index=True)
+    publication_year = Column(Integer, nullable=False)
     amazon_url = Column(String(500))
     cover_image = Column(String(500))
     publisher = Column(String(255))
-    publishing_type = Column(String(50), default="Self-Published")
     source_url = Column(String(500))
-    date_found = Column(Date, nullable=False, index=True)
-    first_seen = Column(Date, nullable=False)
-    last_checked = Column(Date, nullable=False)
-    verification_status = Column(String(50), default="Verified Indie")
+    date_found = Column(Date, nullable=False)
     indie_score = Column(Integer, default=85)
     author = relationship("Author", backref="books")
 
-class DatabaseManager:
+class DB:
     def __init__(self):
-        self.engine = create_engine("sqlite:///indie_authors.db", echo=False)
+        self.engine = create_engine("sqlite:///indie_authors.db")
         Base.metadata.create_all(self.engine)
         self.Session = sessionmaker(bind=self.engine)
 
-    def get_session(self):
+    def session(self):
         return self.Session()
 
-    def clear_all_data(self):
-        session = self.get_session()
+    def count_books(self):
+        s = self.session()
         try:
-            session.query(Book).delete()
-            session.query(Author).delete()
-            session.commit()
+            return s.query(func.count(Book.id)).scalar() or 0
         finally:
-            session.close()
+            s.close()
 
     def count_authors(self):
-        session = self.get_session()
+        s = self.session()
         try:
-            return session.query(func.count(Author.id)).scalar() or 0
+            return s.query(func.count(Author.id)).scalar() or 0
         finally:
-            session.close()
+            s.close()
 
-    def count_books(self):
-        session = self.get_session()
+    def clear(self):
+        s = self.session()
         try:
-            return session.query(func.count(Book.id)).scalar() or 0
+            s.query(Book).delete()
+            s.query(Author).delete()
+            s.commit()
         finally:
-            session.close()
+            s.close()
 
-    def get_books(self, filters=None, limit=100):
-        session = self.get_session()
+    def get_books(self, limit=50):
+        s = self.session()
         try:
-            q = session.query(Book).options(joinedload(Book.author))
-            if filters:
-                if filters.get("genre"):
-                    q = q.filter(Book.genre == filters["genre"])
-                if filters.get("state") and filters["state"] != "All USA":
-                    q = q.join(Author).filter(Author.state == filters["state"])
-            q = q.order_by(Book.publication_date.desc()).limit(limit)
-            return q.all()
+            return s.query(Book).options(joinedload(Book.author)).order_by(Book.publication_date.desc()).limit(limit).all()
         finally:
-            session.close()
+            s.close()
 
-    def export_books(self, filters=None):
-        books = self.get_books(filters, limit=10000)
-        result = []
-        for b in books:
-            d = {
-                "title": b.title,
-                "author_name": b.author.name if b.author else "Unknown",
-                "genre": b.genre,
-                "publication_date": b.publication_date.isoformat() if b.publication_date else "",
-                "amazon_url": b.amazon_url or "",
-                "source_url": b.source_url or ""
-            }
-            result.append(d)
-        return result
+    def add_book(self, title, author_name, genre, year, url):
+        s = self.session()
+        try:
+            ex = s.query(Author).filter(func.lower(Author.name)==func.lower(author_name)).first()
+            if not ex:
+                a = Author(name=author_name, state="California")
+                s.add(a)
+                s.commit()
+                aid = a.id
+            else:
+                aid = ex.id
 
-def search_google_books(query="independently published", max_results=20):
-    """Search Google Books API"""
+            pd = date(year, random.randint(1,12), 1)
+            b = Book(
+                title=title,
+                author_id=aid,
+                genre=genre,
+                publication_date=pd,
+                publication_month=pd.strftime("%B"),
+                publication_year=year,
+                amazon_url=url,
+                source_url=url,
+                date_found=date.today()
+            )
+            s.add(b)
+            s.commit()
+            return True
+        except Exception as e:
+            print(e)
+            return False
+        finally:
+            s.close()
 
+def search_google(q, max_res=20):
     url = "https://www.googleapis.com/books/v1/volumes"
-    params = {
-        "q": query,
-        "maxResults": min(max_results, 40),
-        "orderBy": "newest",
-        "printType": "books"
-    }
-
+    p = {"q": q, "maxResults": min(max_res,40), "orderBy": "newest"}
     try:
-        response = requests.get(url, params=params, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-
+        r = requests.get(url, params=p, timeout=10)
+        d = r.json()
         books = []
-        if "items" in data:
-            for item in data["items"]:
-                vol = item.get("volumeInfo", {})
-
-                authors = vol.get("authors", [])
-                if not authors:
-                    continue
-
-                title = vol.get("title", "Unknown")
-                author = authors[0]
-                pub_date = vol.get("publishedDate", "")
-                publisher = vol.get("publisher", "")
-                categories = vol.get("categories", [])
-                info_link = vol.get("infoLink", "")
-                image = vol.get("imageLinks", {}).get("thumbnail", "")
-
-                # Extract year
-                year = 2026
-                if pub_date and len(pub_date) >= 4:
-                    try:
-                        year = int(pub_date[:4])
-                    except:
-                        year = 2026
-
-                genre = categories[0] if categories else "Fiction"
-                rating = 4.0  # Default
-
-                books.append({
-                    "title": title,
-                    "author": author,
-                    "publisher": publisher,
-                    "year": year,
-                    "genre": genre,
-                    "url": info_link,
-                    "image": image,
-                    "rating": rating
-                })
-
+        if "items" in d:
+            for i in d["items"]:
+                v = i.get("volumeInfo", {})
+                authors = v.get("authors", [])
+                if authors:
+                    books.append({
+                        "title": v.get("title", ""),
+                        "author": authors[0],
+                        "year": int(v.get("publishedDate", "2026")[:4]) if v.get("publishedDate") else 2026,
+                        "genre": v.get("categories", ["Fiction"])[0] if v.get("categories") else "Fiction",
+                        "url": v.get("infoLink", ""),
+                        "image": v.get("imageLinks", {}).get("thumbnail", "")
+                    })
         return books
-
-    except Exception as e:
-        st.error(f"API Error: {str(e)}")
+    except:
         return []
 
-def add_books(books_data):
-    db = DatabaseManager()
-    session = db.get_session_raw()
-    count = 0
-
-    for bd in books_data:
-        name = bd["author"]
-
-        ex = session.query(Author).filter(
-            func.lower(Author.name) == func.lower(name)
-        ).first()
-
-        if not ex:
-            a = Author(
-                name=name,
-                website=None,
-                email=None,
-                state=random.choice(USA_STATES[1:]),
-                country="USA"
-            )
-            session.add(a)
-            session.commit()
-            aid = a.id
-        else:
-            aid = ex.id
-
-        pd_date = date(bd["year"], random.randint(1, 12), 1)
-
-        b = Book(
-            title=bd["title"],
-            author_id=aid,
-            genre=bd["genre"],
-            publication_date=pd_date,
-            publication_month=pd_date.strftime("%B"),
-            publication_year=pd_date.year,
-            amazon_url=bd["url"],
-            cover_image=bd.get("image"),
-            publisher=bd.get("publisher", "Indie"),
-            publishing_type="Self-Published",
-            source_url=bd["url"],
-            date_found=date.today(),
-            first_seen=date.today(),
-            last_checked=date.today(),
-            verification_status="Verified Indie",
-            indie_score=int(bd["rating"] * 20)
-        )
-
-        session.add(b)
-        session.commit()
-        count += 1
-
-    session.close()
-    return count
-
-st.set_page_config(
-    page_title="Indie Author Finder",
-    page_icon="📚",
-    layout="wide"
-)
+st.set_page_config(page_title="Indie Finder", page_icon="📚", layout="wide")
 
 with st.sidebar:
-    st.markdown("### 📚 Menu")
-    page = st.radio(
-        "Go to",
-        ["Dashboard", "Search Books"],
-        label_visibility="collapsed"
-    )
+    st.markdown("### Menu")
+    pg = st.radio("Page", ["Dashboard", "Search"], label_visibility="collapsed")
     st.divider()
-    db = DatabaseManager()
+    db = DB()
     st.metric("Books", db.count_books())
-    st.metric("Authors", db.count_authors())
 
-if page == "Dashboard":
-    st.title("📚 Indie Author Finder 2026")
-    st.markdown("Real books from Google Books API")
-
-    db = DatabaseManager()
-    c1, c2 = st.columns(2)
-    with c1: st.metric("📚 Books", db.count_books())
-    with c2: st.metric("✍️ Authors", db.count_authors())
-
+if pg == "Dashboard":
+    st.title("📚 Indie Author Finder")
+    db = DB()
+    st.metric("Total Books", db.count_books())
     st.divider()
 
-    with st.sidebar:
-        search = st.text_input("Search Title")
-        genre_list = ["All", "Fiction", "Nonfiction"]
-        genre_f = st.selectbox("Genre", genre_list)
-        state_f = st.selectbox("State", USA_STATES)
-
-    f = {}
-    if search: f["search_title"] = search
-    if genre_f != "All": f["genre"] = genre_f
-    if state_f != "All USA": f["state"] = state_f
-
-    books = db.get_books(f, limit=50)
-    st.markdown(f"### Books ({len(books)})")
+    books = db.get_books(50)
+    st.write(f"### Books ({len(books)})")
 
     if not books:
-        st.info("📝 No books yet. Go to Search Books!")
+        st.info("No books. Go to Search!")
     else:
-        for bk in books:
+        for b in books:
             with st.container():
-                c1, c2 = st.columns([1, 5])
+                c1, c2 = st.columns([1, 4])
                 with c1:
-                    if bk.cover_image:
-                        st.image(bk.cover_image, width=100)
+                    if b.cover_image:
+                        st.image(b.cover_image, width=80)
                     else:
-                        st.markdown("📖")
+                        st.write("📖")
                 with c2:
-                    st.markdown(f"### {bk.title}")
-                    an = bk.author.name if bk.author else "Unknown"
-                    st.markdown(f"**Author:** {an}")
-                    st.markdown(f"**Genre:** {bk.genre}")
-                    st.markdown(f"**Published:** {bk.publication_date}")
-                    if bk.author and bk.author.state:
-                        st.markdown(f"📍 {bk.author.state}")
-                    sc = bk.indie_score
-                    em = "🟢" if sc >= 80 else "🟡"
-                    st.markdown(f"{em} Score: {sc}")
-
-                    if bk.source_url:
-                        st.link_button("📚 View", bk.source_url)
+                    st.write(f"### {b.title}")
+                    st.write(f"**Author:** {b.author.name if b.author else '?'}")
+                    st.write(f"**Genre:** {b.genre}")
+                    st.write(f"**Date:** {b.publication_date}")
+                    if b.source_url:
+                        st.link_button("View", b.source_url)
                 st.divider()
 
-    if st.button("📄 Export CSV"):
-        data = db.export_books(f)
-        df = pd.DataFrame(data)
-        csv = df.to_csv(index=False)
-        st.download_button(
-            "Download CSV",
-            data=csv,
-            file_name=f"books_{date.today()}.csv",
-            mime="text/csv"
-        )
+elif pg == "Search":
+    st.title("🔍 Search Books")
 
-elif page == "Search Books":
-    st.markdown("### 🔍 Search Google Books API")
-    st.info("✅ FREE Google Books API - Works reliably!")
+    q = st.text_input("Search", value="indie books 2026")
+    max_b = st.slider("Max", 5, 40, 20)
 
-    query = st.text_input(
-        "Search Query",
-        value="independently published 2026",
-        help="Search for indie books"
-    )
-
-    max_books = st.slider("Max Results", 5, 40, 20)
-
-    if st.button("🔍 Search", type="primary"):
-        with st.spinner(f"Searching..."):
-            books = search_google_books(query=query, max_results=max_books)
-
+    if st.button("Search", type="primary"):
+        with st.spinner("Searching..."):
+            books = search_google(q, max_b)
             if books:
                 st.success(f"Found {len(books)} books!")
-
-                st.markdown(f"### Results ({len(books)} books)")
                 for bk in books[:10]:
                     with st.container():
                         c1, c2 = st.columns([1, 4])
@@ -333,45 +190,29 @@ elif page == "Search Books":
                             if bk.get("image"):
                                 st.image(bk["image"], width=80)
                             else:
-                                st.markdown("📖")
+                                st.write("📖")
                         with c2:
-                            st.markdown(f"**{bk["title"]}**")
-                            st.markdown(f"By: {bk["author"]}")
-                            st.markdown(f"⭐ {bk["rating"]}/5 | {bk["genre"]}")
-                            st.link_button("View Book", bk["url"])
+                            st.write(f"**{bk['title']}**")
+                            st.write(f"By: {bk['author']}")
+                            st.link_button("View", bk["url"])
                         st.divider()
 
-                if len(books) > 10:
-                    st.info(f"...and {len(books) - 10} more")
-
-                if st.button(f"➕ Add All {len(books)} Books", type="primary"):
-                    with st.spinner("Adding..."):
-                        cnt = add_books(books)
-                        st.success(f"✅ Added {cnt} books!")
-                        st.balloons()
-                        st.info("Go to Dashboard!")
+                if st.button(f"Add All {len(books)} Books"):
+                    db = DB()
+                    cnt = 0
+                    for bk in books:
+                        if db.add_book(bk["title"], bk["author"], bk["genre"], bk["year"], bk["url"]):
+                            cnt += 1
+                    st.success(f"Added {cnt} books!")
+                    st.balloons()
             else:
-                st.warning("No books found. Try different query.")
+                st.warning("No books found")
 
     st.divider()
-    st.markdown("### ⚙️ Database")
-
-    db = DatabaseManager()
-    st.info(f"Current: {db.count_books()} books")
-
-    if st.button("🗑️ Clear All Data", type="secondary"):
-        db.clear_all_data()
-        st.success("✅ Cleared!")
-        st.info("Refresh to see changes")
-
-    st.markdown("### 💡 Search Tips:")
-    st.markdown("""
-    - "independently published 2026"
-    - "self-published fiction"
-    - "indie author fantasy"
-    - "self published romance"
-    - "indie books mystery"
-    """)
+    db = DB()
+    if st.button("Clear All Data"):
+        db.clear()
+        st.success("Cleared! Refresh page")
 
 st.divider()
-st.markdown("Google Books API | v9.0"
+st.write("v10.0")
