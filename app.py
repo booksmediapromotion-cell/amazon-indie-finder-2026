@@ -1,17 +1,17 @@
 """
-Indie Author Finder 2026 - With Filters
+Indie Author Finder 2026 - Filters Only
 """
 import streamlit as st
 from datetime import date, datetime
 import pandas as pd
 from sqlalchemy import create_engine, Column, Integer, String, Date, DateTime, ForeignKey, func
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship, joinedload
-import requests
 import random
 
-USA_STATES = ["All USA", "California", "Texas", "New York", "Florida"]
-GENRES = ["All Genres", "Fiction", "Nonfiction", "Fantasy", "Sci-Fi", "Mystery", "Romance", "Thriller", "Self-Help", "Business"]
+USA_STATES = ["All Locations", "California", "Texas", "New York", "Florida", "Washington", "Oregon", "Colorado", "North Carolina", "Georgia"]
+GENRES = ["All Genres", "Fiction", "Nonfiction", "Fantasy", "Science Fiction", "Mystery", "Romance", "Thriller", "Self-Help", "Business", "Biography", "History"]
 MONTHS = ["All Months", "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+YEARS = ["All Years", "2026", "2025", "2024", "2023", "2022"]
 
 Base = declarative_base()
 
@@ -72,7 +72,7 @@ class DB:
         finally:
             s.close()
 
-    def get_books(self, genre="All Genres", month="All Months", limit=50):
+    def get_books(self, genre="All Genres", location="All Locations", month="All Months", year="All Years", limit=100):
         s = self.session()
         try:
             q = s.query(Book).options(joinedload(Book.author))
@@ -80,164 +80,144 @@ class DB:
             if genre != "All Genres":
                 q = q.filter(Book.genre == genre)
 
+            if location != "All Locations":
+                q = q.join(Author).filter(Author.state == location)
+
             if month != "All Months":
                 q = q.filter(Book.publication_month == month)
+
+            if year != "All Years":
+                q = q.filter(Book.publication_year == int(year))
 
             q = q.order_by(Book.publication_date.desc()).limit(limit)
             return q.all()
         finally:
             s.close()
 
-    def add_book(self, title, author_name, genre, year, url, image=""):
+    def add_sample_books(self):
         s = self.session()
         try:
-            ex = s.query(Author).filter(func.lower(Author.name)==func.lower(author_name)).first()
-            if not ex:
-                a = Author(name=author_name, state="California")
-                s.add(a)
-                s.commit()
-                aid = a.id
-            else:
-                aid = ex.id
+            if s.query(func.count(Book.id)).scalar() > 0:
+                return 0
 
-            pd = date(year, random.randint(1,12), 1)
-            b = Book(
-                title=title,
-                author_id=aid,
-                genre=genre,
-                publication_date=pd,
-                publication_month=pd.strftime("%B"),
-                publication_year=year,
-                amazon_url=url,
-                cover_image=image,
-                source_url=url,
-                date_found=date.today()
-            )
-            s.add(b)
+            genres = ["Fiction", "Nonfiction", "Fantasy", "Science Fiction", "Mystery", "Romance", "Thriller", "Self-Help", "Business", "Biography"]
+            locations = ["California", "Texas", "New York", "Florida", "Washington", "Oregon", "Colorado", "North Carolina", "Georgia"]
+            months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+
+            titles = [
+                "The Silent Echo", "Beyond the Horizon", "Midnight Dreams", "The Last Chapter",
+                "Hidden Truths", "Morning Light", "The Forgotten Path", "Endless Journey",
+                "Shadows Within", "The Breaking Point", "Untold Stories", "The Final Word",
+                "Between Worlds", "The Turning Tide", "Lost and Found", "The Quiet Storm",
+                "Rising Sun", "The Open Road", "Deep Waters", "The Golden Hour"
+            ]
+
+            authors = [
+                "Sarah Mitchell", "James Cooper", "Emily Rose", "Michael Chen",
+                "Jessica Adams", "David Park", "Amanda White", "Robert Taylor",
+                "Lauren Green", "Thomas Brown", "Nicole Davis", "Christopher Lee",
+                "Melissa Hall", "Daniel Wilson", "Rachel Moore", "Kevin Anderson"
+            ]
+
+            for i in range(50):
+                author_name = random.choice(authors)
+                ex = s.query(Author).filter(func.lower(Author.name)==func.lower(author_name)).first()
+                if not ex:
+                    a = Author(name=author_name, state=random.choice(locations))
+                    s.add(a)
+                    s.commit()
+                    aid = a.id
+                else:
+                    aid = ex.id
+
+                genre = random.choice(genres)
+                year = random.choice([2026, 2025, 2024, 2023])
+                month = random.choice(months)
+                month_num = months.index(month) + 1
+                pd = date(year, month_num, random.randint(1, 28))
+
+                b = Book(
+                    title=random.choice(titles) + f" #{i+1}",
+                    author_id=aid,
+                    genre=genre,
+                    publication_date=pd,
+                    publication_month=month,
+                    publication_year=year,
+                    amazon_url=f"https://amazon.com/book{i}",
+                    source_url=f"https://amazon.com/book{i}",
+                    date_found=date.today(),
+                    indie_score=random.randint(75, 95)
+                )
+                s.add(b)
+
             s.commit()
-            return True
+            return 50
         except Exception as e:
             print(e)
-            return False
+            return 0
         finally:
             s.close()
-
-def search_google(q, max_res=20):
-    url = "https://www.googleapis.com/books/v1/volumes"
-    p = {"q": q, "maxResults": min(max_res,40), "orderBy": "newest"}
-    try:
-        r = requests.get(url, params=p, timeout=10)
-        d = r.json()
-        books = []
-        if "items" in d:
-            for i in d["items"]:
-                v = i.get("volumeInfo", {})
-                authors = v.get("authors", [])
-                if authors:
-                    books.append({
-                        "title": v.get("title", ""),
-                        "author": authors[0],
-                        "year": int(v.get("publishedDate", "2026")[:4]) if v.get("publishedDate") else 2026,
-                        "genre": v.get("categories", ["Fiction"])[0] if v.get("categories") else "Fiction",
-                        "url": v.get("infoLink", ""),
-                        "image": v.get("imageLinks", {}).get("thumbnail", "")
-                    })
-        return books
-    except:
-        return []
 
 st.set_page_config(page_title="Indie Finder", page_icon="📚", layout="wide")
 
 with st.sidebar:
     st.markdown("### Menu")
-    pg = st.radio("Page", ["Dashboard", "Search"], label_visibility="collapsed")
     st.divider()
     db = DB()
     st.metric("Books", db.count_books())
+    st.metric("Authors", db.count_authors())
 
-if pg == "Dashboard":
-    st.title("📚 Indie Author Finder")
-
-    # Filters
-    c1, c2 = st.columns(2)
-    with c1:
-        genre_f = st.selectbox("📚 Genre", GENRES)
-    with c2:
-        month_f = st.selectbox("📅 Month", MONTHS)
+    if st.button("Add Sample Data"):
+        db.add_sample_books()
+        st.success("Added 50 books!")
+        st.rerun()
 
     st.divider()
-
-    db = DB()
-    c1, c2 = st.columns(2)
-    with c1: st.metric("Total Books", db.count_books())
-    with c2: st.metric("Total Authors", db.count_authors())
-
-    st.divider()
-
-    books = db.get_books(genre=genre_f, month=month_f, limit=50)
-    st.write(f"### Books ({len(books)})")
-
-    if not books:
-        st.info("No books. Go to Search!")
-    else:
-        for b in books:
-            with st.container():
-                c1, c2 = st.columns([1, 4])
-                with c1:
-                    if b.cover_image:
-                        st.image(b.cover_image, width=80)
-                    else:
-                        st.write("📖")
-                with c2:
-                    st.write(f"### {b.title}")
-                    st.write(f"**Author:** {b.author.name if b.author else '?'}")
-                    st.write(f"**Genre:** {b.genre}")
-                    st.write(f"**Published:** {b.publication_date.strftime('%B %d, %Y')}")
-                    if b.source_url:
-                        st.link_button("View", b.source_url)
-                st.divider()
-
-elif pg == "Search":
-    st.title("🔍 Search Books")
-
-    q = st.text_input("Search", value="indie books 2026")
-    max_b = st.slider("Max", 5, 40, 20)
-
-    if st.button("Search", type="primary"):
-        with st.spinner("Searching..."):
-            books = search_google(q, max_b)
-            if books:
-                st.success(f"Found {len(books)} books!")
-                for bk in books[:10]:
-                    with st.container():
-                        c1, c2 = st.columns([1, 4])
-                        with c1:
-                            if bk.get("image"):
-                                st.image(bk["image"], width=80)
-                            else:
-                                st.write("📖")
-                        with c2:
-                            st.write(f"**{bk['title']}**")
-                            st.write(f"By: {bk['author']}")
-                            st.link_button("View", bk["url"])
-                        st.divider()
-
-                if st.button(f"Add All {len(books)} Books"):
-                    db = DB()
-                    cnt = 0
-                    for bk in books:
-                        if db.add_book(bk["title"], bk["author"], bk["genre"], bk["year"], bk["url"], bk.get("image", "")):
-                            cnt += 1
-                    st.success(f"Added {cnt} books!")
-                    st.balloons()
-            else:
-                st.warning("No books found")
-
-    st.divider()
-    db = DB()
     if st.button("Clear All Data"):
         db.clear()
-        st.success("Cleared! Refresh page")
+        st.success("Cleared!")
+
+st.title("📚 Indie Author Finder")
+
+# Filters
+st.subheader("🔍 Filter Books")
+c1, c2, c3, c4 = st.columns(4)
+with c1:
+    genre_f = st.selectbox("Genre", GENRES)
+with c2:
+    location_f = st.selectbox("Location", USA_STATES)
+with c3:
+    month_f = st.selectbox("Month", MONTHS)
+with c4:
+    year_f = st.selectbox("Year", YEARS)
 
 st.divider()
-st.write("v11.0 with Filters")
+
+db = DB()
+books = db.get_books(genre=genre_f, location=location_f, month=month_f, year=year_f, limit=100)
+
+st.write(f"### Results: {len(books)} Books")
+
+if not books:
+    st.info("No books found. Click 'Add Sample Data' in sidebar to see examples!")
+else:
+    for b in books:
+        with st.container():
+            c1, c2 = st.columns([1, 4])
+            with c1:
+                if b.cover_image:
+                    st.image(b.cover_image, width=80)
+                else:
+                    st.write("📖")
+            with c2:
+                st.write(f"### {b.title}")
+                st.write(f"**Author:** {b.author.name if b.author else '?'} ({b.author.state if b.author else '?'})")
+                st.write(f"**Genre:** {b.genre}")
+                st.write(f"**Published:** {b.publication_date.strftime('%B %d, %Y')}")
+                st.write(f"**Score:** {b.indie_score}/100")
+                if b.source_url:
+                    st.link_button("View on Amazon", b.source_url)
+            st.divider()
+
+st.divider()
+st.write("v12.0 - Filters Only")
