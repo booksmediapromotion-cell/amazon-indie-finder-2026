@@ -1,5 +1,5 @@
 """
-Amazon Indie Author Finder 2026 - GOODREADS FINAL (No Apostrophes)
+Amazon Indie Author Finder 2026 - CLEAN VERSION
 """
 import streamlit as st
 from datetime import date, timedelta, datetime
@@ -139,18 +139,17 @@ class DatabaseManager:
     def get_session_raw(self):
         return self.get_session()
 
-# Goodreads books - NO APOSTROPHES!
 GOODREADS_INDIE_BOOKS = [
-    {"title": "The Indie Authors Guide to Success", "author": "Sarah J. Martinez", "genre": "Nonfiction", "year": 2026, "rating": 4.5, "url": "https://www.goodreads.com/book/show/123456"},
-    {"title": "Shadows of the Forgotten", "author": "Michael Chen", "genre": "Fantasy", "year": 2026, "rating": 4.3, "url": "https://www.goodreads.com/book/show/123457"},
-    {"title": "Love in the Time of AI", "author": "Emily R. Thompson", "genre": "Romance", "year": 2026, "rating": 4.6, "url": "https://www.goodreads.com/book/show/123458"},
-    {"title": "The Last Detective", "author": "James OBrien", "genre": "Mystery", "year": 2026, "rating": 4.4, "url": "https://www.goodreads.com/book/show/123459"},
-    {"title": "Beyond the Stars", "author": "David K. Williams", "genre": "Science Fiction", "year": 2026, "rating": 4.7, "url": "https://www.goodreads.com/book/show/123460"},
-    {"title": "The Healers Journey", "author": "Jessica Anderson", "genre": "Fantasy", "year": 2026, "rating": 4.5, "url": "https://www.goodreads.com/book/show/123461"},
-    {"title": "Midnight Secrets", "author": "Robert Garcia", "genre": "Thriller", "year": 2026, "rating": 4.2, "url": "https://www.goodreads.com/book/show/123462"},
-    {"title": "The Self-Publishing Revolution", "author": "Amanda Lee", "genre": "Nonfiction", "year": 2026, "rating": 4.8, "url": "https://www.goodreads.com/book/show/123463"},
-    {"title": "Dragons Legacy", "author": "Christopher Brown", "genre": "Fantasy", "year": 2026, "rating": 4.4, "url": "https://www.goodreads.com/book/show/123464"},
-    {"title": "The Indie Marketing Handbook", "author": "Nicole Taylor", "genre": "Nonfiction", "year": 2026, "rating": 4.6, "url": "https://www.goodreads.com/book/show/123465"}
+    {"title": "The Indie Authors Guide", "author": "Sarah Martinez", "genre": "Nonfiction", "year": 2026, "rating": 4.5, "url": "https://goodreads.com/book/1"},
+    {"title": "Shadows of the Forgotten", "author": "Michael Chen", "genre": "Fantasy", "year": 2026, "rating": 4.3, "url": "https://goodreads.com/book/2"},
+    {"title": "Love in the Time of AI", "author": "Emily Thompson", "genre": "Romance", "year": 2026, "rating": 4.6, "url": "https://goodreads.com/book/3"},
+    {"title": "The Last Detective", "author": "James OBrien", "genre": "Mystery", "year": 2026, "rating": 4.4, "url": "https://goodreads.com/book/4"},
+    {"title": "Beyond the Stars", "author": "David Williams", "genre": "Science Fiction", "year": 2026, "rating": 4.7, "url": "https://goodreads.com/book/5"},
+    {"title": "The Healers Journey", "author": "Jessica Anderson", "genre": "Fantasy", "year": 2026, "rating": 4.5, "url": "https://goodreads.com/book/6"},
+    {"title": "Midnight Secrets", "author": "Robert Garcia", "genre": "Thriller", "year": 2026, "rating": 4.2, "url": "https://goodreads.com/book/7"},
+    {"title": "Self Publishing Revolution", "author": "Amanda Lee", "genre": "Nonfiction", "year": 2026, "rating": 4.8, "url": "https://goodreads.com/book/8"},
+    {"title": "Dragons Legacy", "author": "Christopher Brown", "genre": "Fantasy", "year": 2026, "rating": 4.4, "url": "https://goodreads.com/book/9"},
+    {"title": "Indie Marketing Handbook", "author": "Nicole Taylor", "genre": "Nonfiction", "year": 2026, "rating": 4.6, "url": "https://goodreads.com/book/10"}
 ]
 
 def add_goodreads_books():
@@ -163,17 +162,40 @@ def add_goodreads_books():
         existing_author = session.query(Author).filter(func.lower(Author.name) == func.lower(author_name)).first()
 
         if not existing_author:
-            author = Author(name=author_name, website=None, email=None, state=random.choice(USA_STATES[1:]) if random.random() > 0.5 else None, country="USA", created_at=datetime.utcnow())
+            author = Author(
+                name=author_name,
+                website=None,
+                email=None,
+                state=random.choice(USA_STATES[1:]) if random.random() > 0.5 else None,
+                country="USA",
+                created_at=datetime.utcnow()
+            )
             session.add(author)
             session.commit()
             author_id = author.id
         else:
             author_id = existing_author.id
 
-        pub_date = date(book_data["year"], random.randint(1, 12), random.randint(1, 28))
+        pub_date = date(book_data["year"], random.randint(1, 12), 1)
         indie_score = int(book_data["rating"] * 20)
 
-        book = Book(title=book_data["title"], author_id=author_id, genre=book_data["genre"], publication_date=pub_date, publication_month=pub_date.strftime("%B"), publication_year=pub_date.year, amazon_url=book_data["url"], publisher="Independently published", publishing_type="Self-Published", source_url=book_data["url"], date_found=date.today(), first_seen=date.today(), last_checked=date.today(), verification_status="Verified Indie", indie_score=indie_score)
+        book = Book(
+            title=book_data["title"],
+            author_id=author_id,
+            genre=book_data["genre"],
+            publication_date=pub_date,
+            publication_month=pub_date.strftime("%B"),
+            publication_year=pub_date.year,
+            amazon_url=book_data["url"],
+            publisher="Independently published",
+            publishing_type="Self-Published",
+            source_url=book_data["url"],
+            date_found=date.today(),
+            first_seen=date.today(),
+            last_checked=date.today(),
+            verification_status="Verified Indie",
+            indie_score=indie_score
+        )
 
         session.add(book)
         session.commit()
@@ -185,7 +207,7 @@ def add_goodreads_books():
 def add_sample_data():
     db = DatabaseManager()
     session = db.get_session_raw()
-    genres = ["Fantasy", "Science Fiction", "Mystery", "Romance", "Thriller", "Horror", "Young Adult Fiction", "Nonfiction", "Self-Help", "Biography"]
+    genres = ["Fantasy", "Sci-Fi", "Mystery", "Romance", "Thriller", "Horror", "YA Fiction", "Nonfiction", "Self-Help", "Biography"]
     first_names = ["James", "Sarah", "Michael", "Emily", "David", "Jessica", "Robert", "Ashley", "William", "Amanda"]
     last_names = ["Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller", "Davis", "Rodriguez", "Martinez"]
 
@@ -197,4 +219,5 @@ def add_sample_data():
         existing_author = session.query(Author).filter(func.lower(Author.name) == func.lower(author_name)).first()
 
         if not existing_author:
-            author = Author(name=author_name, website=f"https://www.{first_name.lower()}{last_name.lower()}books.com", email=f"contact@{first_name.lower()}{last_name.lower()}books.com", state=random
+            website = f"https://{first_name.lower()}{last_name.lower()}books.com"
+            email = f"contact@{first_name.lower()}{last_name.lower()}books.c
